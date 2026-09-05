@@ -253,7 +253,7 @@ def _run_python_checks(
             repo_root, verbose=verbose,
             # smell 生效豁免 = lint ∪ smell.ignore（B1 语义解耦）
             ignore_paths=smell_effective_ignore_paths(config),
-            smell_config=build_smell_config(config),
+            smell_config=build_smell_config(config),  # 含 function_ignore（C2）
         )
         blocked = blocked or result["smell"]["blocking"]
     return result, blocked
@@ -393,20 +393,28 @@ def scan(lang: str, output: str | None, no_archive: bool, verbose: bool):
         quality-gate scan --lang python          # 只扫 Python
         quality-gate scan --output report.json   # 报告写到指定文件（不存档）
     """
-    from .scanner import (
-        compare_reports,
-        latest_report_path,
-        load_report,
-        print_trend,
-        run_full_scan,
-        save_scan_report,
-    )
+    from .scanner import run_full_scan
 
     ensure_in_git_repo()
     repo_root = Path.cwd()
     click.echo("📊 全仓扫描（周报模式）...")
     results = run_full_scan(repo_root, lang=lang, verbose=verbose)
 
+    report = _build_scan_report(repo_root, lang, results)
+
+    if output:
+        _write_scan_report(output, report)
+    else:
+        _print_scan_stdout(results)
+        if not no_archive:
+            _archive_scan(repo_root, report)
+
+    # scan 不阻塞：问题数不决定退出码；仅工具级错误由 checkers 记录但同样 exit 0
+    sys.exit(0)
+
+
+def _build_scan_report(repo_root: Path, lang: str, results: dict) -> dict:
+    """组装 scan 报告（schema/timestamp/cwd/results/summary）"""
     report = {
         "schema_version": 1,
         "timestamp": _scan_now_iso(),
@@ -414,43 +422,53 @@ def scan(lang: str, output: str | None, no_archive: bool, verbose: bool):
         "scan_lang": lang,
         "results": results,
     }
-    # 汇总计数（供 stdout 摘要与 JSON 消费方）
-    summary = _scan_summary(results)
-    report["summary"] = summary
+    report["summary"] = _scan_summary(results)
+    return report
 
-    if output:
-        output_path = Path(output)
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
-        click.echo(f"📄 报告已保存到：{output_path}")
-        click.echo(f"   摘要: lint 问题 {summary['lint_issues']} 个 / "
-                   f"重复块 {summary['duplication_blocks']} 处 / "
-                   f"依赖违规 {summary['dependency_issues']} 个 / "
-                   f"CRAP 超阈值 {summary['crap_functions']} 个 / "
-                   f"结构坏味道 {summary['smell_issues']} 个")
-    else:
-        click.echo("\n" + "=" * 60)
-        click.echo("全仓扫描结果（存量问题总量，不阻塞）:")
-        for key, value in results.items():
-            if key == "checks_run":
-                continue
-            _print_scan_block(key, value)
 
-        # 存档 + 趋势（baseline 必须在保存前取，否则刚存的报告恒为"最新"）
-        if not no_archive:
-            baseline_path = latest_report_path(repo_root)
-            path = save_scan_report(repo_root, report)
-            click.echo(f"\n📁 报告已存档: {path.relative_to(repo_root)}")
-            if baseline_path and baseline_path != path:
-                baseline = load_report(baseline_path)
-                if baseline:
-                    trend = compare_reports(baseline, report)
-                    print_trend(trend)
-                else:
-                    click.echo("   (上一份存档无法解析，跳过趋势对比)")
+def _write_scan_report(output: str, report: dict) -> None:
+    """scan --output：报告写 JSON 文件 + stdout 摘要计数"""
+    summary = report["summary"]
+    with open(output, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    click.echo(f"📄 报告已保存到：{output}")
+    click.echo(f"   摘要: lint 问题 {summary['lint_issues']} 个 / "
+               f"重复块 {summary['duplication_blocks']} 处 / "
+               f"依赖违规 {summary['dependency_issues']} 个 / "
+               f"CRAP 超阈值 {summary['crap_functions']} 个 / "
+               f"结构坏味道 {summary['smell_issues']} 个")
 
-    # scan 不阻塞：问题数不决定退出码；仅工具级错误由 checkers 记录但同样 exit 0
-    sys.exit(0)
+
+def _print_scan_stdout(results: dict) -> None:
+    """scan 无 --output：逐块打印存量问题摘要"""
+    click.echo("\n" + "=" * 60)
+    click.echo("全仓扫描结果（存量问题总量，不阻塞）:")
+    for key, value in results.items():
+        if key == "checks_run":
+            continue
+        _print_scan_block(key, value)
+
+
+def _archive_scan(repo_root: Path, report: dict) -> None:
+    """存档 + 趋势对比（baseline 必须在保存前取，否则刚存报告恒为最新）"""
+    from .scanner import (
+        compare_reports,
+        latest_report_path,
+        load_report,
+        print_trend,
+        save_scan_report,
+    )
+
+    baseline_path = latest_report_path(repo_root)
+    path = save_scan_report(repo_root, report)
+    click.echo(f"\n📁 报告已存档: {path.relative_to(repo_root)}")
+    if baseline_path and baseline_path != path:
+        baseline = load_report(baseline_path)
+        if baseline:
+            trend = compare_reports(baseline, report)
+            print_trend(trend)
+        else:
+            click.echo("   (上一份存档无法解析，跳过趋势对比)")
 
 
 def _scan_now_iso() -> str:

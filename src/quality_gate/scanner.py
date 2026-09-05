@@ -167,7 +167,7 @@ def _scan_python(
             repo_root, verbose=verbose,
             # smell 生效豁免 = lint ∪ smell.ignore（B1 语义解耦）
             ignore_paths=smell_effective_ignore_paths(config),
-            full=True, smell_config=build_smell_config(config),
+            full=True, smell_config=build_smell_config(config),  # 含 function_ignore
         )
     return result
 
@@ -228,68 +228,86 @@ def compare_reports(baseline: dict[str, Any], current: dict[str, Any]) -> dict[s
         lint: {lang: {check: {before, after, delta}}}
         duplication: {before, after, delta}
     """
-    trend: dict[str, Any] = {}
+    return {
+        "lint": _lint_trend(baseline, current),
+        "duplication": _dup_trend(baseline, current),
+        "crap_functions": _crap_trend(baseline, current),
+        "crap_function_details": _crap_fn_details(baseline, current),
+        "smell": _smell_trend(baseline, current),
+    }
 
-    # lint per-language 计数
+
+def _report_block(report: dict[str, Any], lang: str, check: str) -> Any:
+    """report.results[lang][check]（缺失/非 dict 时回落 {}）"""
+    lang_res = report.get("results", {}).get(lang, {}) or {}
+    result = lang_res.get(check, {})
+    return result if isinstance(result, dict) else {}
+
+
+def _lint_trend(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """lint per-language 计数趋势"""
     lint_trend: dict[str, dict[str, Any]] = {}
     for lang in ("rust", "ts", "python"):
-        b_lint = (baseline.get("results", {}).get(lang, {}) or {}).get("lint", {})
-        c_lint = (current.get("results", {}).get(lang, {}) or {}).get("lint", {})
-        before = len(b_lint.get("issues", [])) if isinstance(b_lint, dict) else 0
-        after = len(c_lint.get("issues", [])) if isinstance(c_lint, dict) else 0
+        b_issues = len(_report_block(baseline, lang, "lint").get("issues", []))
+        c_issues = len(_report_block(current, lang, "lint").get("issues", []))
         # skipped 报告时视为无数据（before/after 保持 0）
-        lint_trend[lang] = {"before": before, "after": after, "delta": after - before}
-    trend["lint"] = lint_trend
+        lint_trend[lang] = {"before": b_issues, "after": c_issues,
+                            "delta": c_issues - b_issues}
+    return lint_trend
 
-    # duplication
+
+def _dup_trend(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """duplication 块计数趋势"""
     b_dup = baseline.get("results", {}).get("duplication", {})
     c_dup = current.get("results", {}).get("duplication", {})
     b_blocks = len(b_dup.get("issues", [])) if isinstance(b_dup, dict) else 0
     c_blocks = len(c_dup.get("issues", [])) if isinstance(c_dup, dict) else 0
-    trend["duplication"] = {
-        "before": b_blocks, "after": c_blocks, "delta": c_blocks - b_blocks,
-    }
+    return {"before": b_blocks, "after": c_blocks, "delta": c_blocks - b_blocks}
 
-    # CRAP 超阈值函数（python complexity 的 issues = 超阈值函数清单）
-    b_crap = (baseline.get("results", {}).get("python", {}) or {}).get("complexity", {})
-    c_crap = (current.get("results", {}).get("python", {}) or {}).get("complexity", {})
-    b_crap_n = len(b_crap.get("issues", [])) if isinstance(b_crap, dict) else 0
-    c_crap_n = len(c_crap.get("issues", [])) if isinstance(c_crap, dict) else 0
-    trend["crap_functions"] = {
-        "before": b_crap_n, "after": c_crap_n, "delta": c_crap_n - b_crap_n,
-    }
 
-    # 函数级趋势：新增/消失的高 CRAP 函数（周报真正关心的对象）
-    def _fn_key(issue: dict) -> str:
-        fn = issue.get("function") or ""
-        if fn:
-            return f"{issue.get('file', '')}:{fn}"
-        # 无 function 字段时退回文件+行（低版本报告）
-        return f"{issue.get('file', '')}:{issue.get('line', 0)}"
+def _crap_trend(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """CRAP 超阈值函数数量趋势（python complexity issues = 超阈值函数清单）"""
+    b_crap_n = len(_report_block(baseline, "python", "complexity").get("issues", []))
+    c_crap_n = len(_report_block(current, "python", "complexity").get("issues", []))
+    return {"before": b_crap_n, "after": c_crap_n, "delta": c_crap_n - b_crap_n}
 
-    def _fn_set(crap_result: Any) -> set[str]:
-        if not isinstance(crap_result, dict):
-            return set()
-        return {_fn_key(i) for i in crap_result.get("issues", [])}
 
-    b_fn = _fn_set(b_crap)
-    c_fn = _fn_set(c_crap)
-    trend["crap_function_details"] = {
+def _fn_key(issue: dict) -> str:
+    fn = issue.get("function") or ""
+    if fn:
+        return f"{issue.get('file', '')}:{fn}"
+    # 无 function 字段时退回文件+行（低版本报告）
+    return f"{issue.get('file', '')}:{issue.get('line', 0)}"
+
+
+def _fn_set(crap_result: Any) -> set[str]:
+    if not isinstance(crap_result, dict):
+        return set()
+    return {_fn_key(i) for i in crap_result.get("issues", [])}
+
+
+def _crap_fn_details(
+    baseline: dict[str, Any], current: dict[str, Any],
+) -> dict[str, list[str]]:
+    """函数级趋势：新增/消失的高 CRAP 函数（周报真正关心的对象）"""
+    b_fn = _fn_set(_report_block(baseline, "python", "complexity"))
+    c_fn = _fn_set(_report_block(current, "python", "complexity"))
+    return {
         "new": sorted(c_fn - b_fn),      # 新增超阈值函数（恶化）
         "fixed": sorted(b_fn - c_fn),    # 已消失超阈值函数（好转）
         "persistent": sorted(c_fn & b_fn),
     }
 
-    # smell（python 结构坏味道：P0/P1 阻塞 issues + P2 报告项）
-    b_smell = (baseline.get("results", {}).get("python", {}) or {}).get("smell", {})
-    c_smell = (current.get("results", {}).get("python", {}) or {}).get("smell", {})
-    trend["smell"] = {
+
+def _smell_trend(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """smell 计数趋势（python：P0/P1 阻塞 issues + P2 报告项）"""
+    b_smell = _report_block(baseline, "python", "smell")
+    c_smell = _report_block(current, "python", "smell")
+    return {
         "before": _smell_count(b_smell),
         "after": _smell_count(c_smell),
         "delta": _smell_count(c_smell) - _smell_count(b_smell),
     }
-
-    return trend
 
 
 def _smell_count(smell_result: Any) -> int:
