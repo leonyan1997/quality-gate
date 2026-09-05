@@ -53,7 +53,7 @@ def check_smell_incremental(
     full=True: 全仓扫描（scan 周报用），全部存量坏味道都进 issues/report。
 
     smell_config: 由 quality-gate.yaml 的 smell 段构建的阈值配置
-    （QualityGateConfig.build_smell_config()）；缺省用 SmellConfig 默认。
+    （build_smell_config()）；缺省用 SmellConfig 默认。
     """
     if ignore_paths is None:
         ignore_paths = []

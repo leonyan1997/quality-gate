@@ -16,6 +16,7 @@ from click.testing import CliRunner
 
 from quality_gate.checkers.smell import check_smell_incremental
 from quality_gate.cli import main
+from quality_gate.config import build_smell_config
 
 _GIT_CFG = ["-c", "user.name=Test", "-c", "user.email=t@t.t"]
 
@@ -227,7 +228,7 @@ class TestConfiguredThresholds:
             "smell:\n  max_function_lines: 5\n",
             "def f():\n" + "    pass\n" * 8,   # 默认 40 不报，收紧后报
         )
-        smell_cfg = self._build_cfg(repo).build_smell_config()
+        smell_cfg = build_smell_config(self._build_cfg(repo))
         assert isinstance(smell_cfg, SmellConfig)
         assert smell_cfg.max_function_lines == 5
 
@@ -247,7 +248,7 @@ class TestConfiguredThresholds:
             "    - long-method\n",
             "def f():\n" + "    pass\n" * 8,
         )
-        smell_cfg = self._build_cfg(repo).build_smell_config()
+        smell_cfg = build_smell_config(self._build_cfg(repo))
         assert smell_cfg.disabled_rules == ["long-method"]
 
         res = check_smell_incremental(repo, smell_config=smell_cfg)

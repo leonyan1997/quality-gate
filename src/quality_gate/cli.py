@@ -21,7 +21,7 @@ from .checkers.rust_lint import check_rust_lint_incremental
 from .checkers.smell import check_smell_incremental
 from .checkers.ts_coverage import check_ts_coverage_incremental
 from .checkers.ts_lint import check_ts_lint_incremental
-from .config import QualityGateConfig
+from .config import QualityGateConfig, build_smell_config
 
 CHECK_TYPES = ["lint", "coverage", "duplication", "complexity", "dependency", "smell"]
 
@@ -135,7 +135,7 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
     crap_threshold = config.get_threshold("crap", 30)
     lint_ignore_paths = config.lint_ignore_paths
     coverage_ignore_paths = config.coverage_ignore_paths
-    smell_cfg = config.build_smell_config()
+    smell_cfg = build_smell_config(config)
 
     # Rust 检查
     if lang in ["rust", "all"]:

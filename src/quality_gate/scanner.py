@@ -35,7 +35,7 @@ from .checkers.python_lint import check_python_lint_incremental
 from .checkers.rust_lint import check_rust_lint_incremental
 from .checkers.smell import check_smell_incremental
 from .checkers.ts_lint import check_ts_lint_incremental
-from .config import QualityGateConfig
+from .config import QualityGateConfig, build_smell_config
 
 # 存档目录: <repo>/.quality-gate/history/scan-<timestamp>.json
 HISTORY_SUBDIR = ".quality-gate/history"
@@ -87,7 +87,7 @@ def run_full_scan(
     min_tokens = config.get_threshold("min_tokens", 50)
     min_lines = config.get_threshold("min_lines", 5)
     dup_threshold = config.get_threshold("duplication", 3.0)
-    smell_cfg = config.build_smell_config()
+    smell_cfg = build_smell_config(config)
 
     results: dict[str, Any] = {"checks_run": DEFAULT_SCAN_CHECKS}
 

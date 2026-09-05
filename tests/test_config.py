@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from quality_gate.config import QualityGateConfig
+from quality_gate.config import QualityGateConfig, build_smell_config
 
 
 class TestConfigDefaults:
@@ -76,7 +76,7 @@ class TestSmellConfig:
         from quality_gate.smell.types import SmellConfig
 
         cfg = QualityGateConfig()
-        smell_cfg = cfg.build_smell_config()
+        smell_cfg = build_smell_config(cfg)
 
         assert isinstance(smell_cfg, SmellConfig)
         assert smell_cfg.max_function_lines == 40
@@ -99,7 +99,7 @@ class TestSmellConfig:
             encoding="utf-8",
         )
         cfg = QualityGateConfig(config_path=config_file)
-        smell_cfg = cfg.build_smell_config()
+        smell_cfg = build_smell_config(cfg)
 
         assert smell_cfg.max_function_lines == 60
         # 未覆盖项保留默认
@@ -118,7 +118,7 @@ class TestSmellConfig:
             encoding="utf-8",
         )
         cfg = QualityGateConfig(config_path=config_file)
-        smell_cfg = cfg.build_smell_config()
+        smell_cfg = build_smell_config(cfg)
 
         assert smell_cfg.enabled_rules == ["long-method"]
 
@@ -132,7 +132,7 @@ class TestSmellConfig:
             encoding="utf-8",
         )
         cfg = QualityGateConfig(config_path=config_file)
-        smell_cfg = cfg.build_smell_config()
+        smell_cfg = build_smell_config(cfg)
 
         assert smell_cfg.max_function_lines == 50
         assert smell_cfg.max_class_lines == 300
@@ -152,11 +152,11 @@ class TestSmellConfig:
             encoding="utf-8",
         )
         first = QualityGateConfig(config_path=config_file)
-        assert first.build_smell_config().max_function_lines == 50
+        assert build_smell_config(first).max_function_lines == 50
 
         # 同一进程内的新实例必须回落干净默认
         second = QualityGateConfig()
-        smell_cfg = second.build_smell_config()
+        smell_cfg = build_smell_config(second)
         assert smell_cfg.max_function_lines == 40
         assert smell_cfg.disabled_rules is None
         # 既有嵌套段（thresholds）同样不受前例污染
