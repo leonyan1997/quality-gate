@@ -18,6 +18,39 @@ import yaml
 
 from .smell.types import SmellConfig
 
+# 工具内部语言标识（canonical）：CLI --lang 与语言循环统一用这些
+ALL_LANGUAGES = ("rust", "ts", "python")
+# quality-gate.yaml languages 段的别名 → canonical（示例默认写 typescript）
+_LANG_ALIASES = {"typescript": "ts"}
+
+
+def resolve_languages(
+    config: "QualityGateConfig", requested: str | None = None,
+) -> list[str]:
+    """决定一次 check/scan 实际运行的语言集合（canonical rust/ts/python）
+
+    requested:
+      None      → 按 config.languages（未声明 = 内置默认三语言）
+      "all"     → 全部语言（显式覆盖配置）
+      语言名    → 只跑该语言（CLI Choice 已校验）
+    config.languages 支持 typescript/ts 别名；未知语言名忽略不报错。
+    """
+    if requested is None:
+        raw = config.languages or list(ALL_LANGUAGES)
+    elif requested == "all":
+        return list(ALL_LANGUAGES)
+    elif requested in ALL_LANGUAGES:
+        return [requested]
+    else:
+        raise ValueError(f"未知语言: {requested}")
+
+    langs: list[str] = []
+    for item in raw:
+        canon = _LANG_ALIASES.get(item, item)
+        if canon in ALL_LANGUAGES and canon not in langs:
+            langs.append(canon)
+    return langs
+
 
 def _find_config_file() -> Path | None:
     """递归查找配置文件（从 cwd 向上最多 5 层，兼容子项目目录）"""

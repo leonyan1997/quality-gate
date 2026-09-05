@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from quality_gate.config import (
     QualityGateConfig,
     build_smell_config,
+    resolve_languages,
     smell_effective_ignore_paths,
 )
 
@@ -211,3 +212,47 @@ class TestSmellIgnorePaths:
         smell_cfg = build_smell_config(cfg)
         assert smell_cfg.max_function_lines == 50  # 常规键仍生效
         assert not hasattr(smell_cfg, "ignore")  # ignore 不进 SmellConfig
+
+
+class TestResolveLanguages:
+    """resolve_languages：languages 配置决定实际运行语言（A 包）"""
+
+    def test_default_config_all_three(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)  # 隔离仓库根 dogfood 配置
+        cfg = QualityGateConfig()
+        assert resolve_languages(cfg) == ["rust", "ts", "python"]
+        assert resolve_languages(cfg, "all") == ["rust", "ts", "python"]
+        assert resolve_languages(cfg, "python") == ["python"]
+
+    def test_config_languages_restrict(self, tmp_path):
+        config_file = tmp_path / "quality-gate.yaml"
+        config_file.write_text(
+            "languages:\n"
+            "  - python\n",
+            encoding="utf-8",
+        )
+        cfg = QualityGateConfig(config_path=config_file)
+        assert resolve_languages(cfg) == ["python"]
+        # 显式 --lang 覆盖配置
+        assert resolve_languages(cfg, "all") == ["rust", "ts", "python"]
+        assert resolve_languages(cfg, "rust") == ["rust"]
+
+    def test_typescript_alias_normalized(self, tmp_path):
+        """yaml languages 写 typescript（默认/示例形态）→ canonical ts"""
+        config_file = tmp_path / "quality-gate.yaml"
+        config_file.write_text(
+            "languages:\n"
+            "  - rust\n"
+            "  - typescript\n",
+            encoding="utf-8",
+        )
+        cfg = QualityGateConfig(config_path=config_file)
+        assert resolve_languages(cfg) == ["rust", "ts"]
+        # 未知语言名忽略不报错
+        config_file.write_text(
+            "languages:\n"
+            "  - python\n"
+            "  - cobol\n",
+            encoding="utf-8",
+        )
+        assert resolve_languages(QualityGateConfig(config_path=config_file)) == ["python"]

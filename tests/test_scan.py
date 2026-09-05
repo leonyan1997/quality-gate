@@ -207,6 +207,48 @@ class TestRunFullScan:
         # smell 只挂 python 分支
         assert "smell" in results["python"]
 
+    def test_config_languages_restrict_default_scan(self, tmp_path, monkeypatch):
+        """config languages=[python] → 缺省 lang(None) 只跑 python（A 包）"""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "quality-gate.yaml").write_text(
+            "languages:\n  - python\n", encoding="utf-8",
+        )
+        called: list[str] = []
+
+        def fake_py_lint(*a, **kw):
+            called.append("python")
+            return _lint_result(0)
+
+        def fake_rust_lint(*a, **kw):
+            called.append("rust")
+            return _lint_result(0)
+
+        def fake_ts_lint(*a, **kw):
+            called.append("ts")
+            return _lint_result(0)
+
+        def fake_dep(*a, **kw):
+            return _dep_result()
+
+        def fake_crap(*a, **kw):
+            return _crap_result(0)
+
+        def fake_smell(*a, **kw):
+            return _smell_result(0)
+
+        monkeypatch.setattr(scanner, "check_python_lint_incremental", fake_py_lint)
+        monkeypatch.setattr(scanner, "check_rust_lint_incremental", fake_rust_lint)
+        monkeypatch.setattr(scanner, "check_ts_lint_incremental", fake_ts_lint)
+        monkeypatch.setattr(scanner, "check_dependency_incremental", fake_dep)
+        monkeypatch.setattr(scanner, "check_python_crap_incremental", fake_crap)
+        monkeypatch.setattr(scanner, "check_smell_incremental", fake_smell)
+
+        results = scanner.run_full_scan(tmp_path)  # lang=None → config.languages
+
+        assert called == ["python"]
+        assert "rust" not in results and "ts" not in results
+        assert "python" in results
+
 
 class TestArchive:
     """存档/加载往返"""
@@ -375,3 +417,93 @@ class TestScanSummary:
             "dependency_issues": 0, "crap_functions": 0,
             "smell_issues": 0,
         }
+
+
+class TestCliLanguages:
+    """cli.check 尊重 config.languages（A 包：声明语言才跑）"""
+
+    def _git_repo(self, tmp_path):
+        import subprocess
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "-c", "user.name=T",
+             "-c", "user.email=t@t.t", "commit", "-qm", "init"],
+            check=True,
+        )
+        return repo
+
+    def test_python_only_config_skips_rust_ts_checkers(self, tmp_path, monkeypatch):
+        """languages=[python] + 缺省 --lang → 只跑 python，不调 rust/ts runner"""
+        from click.testing import CliRunner
+
+        from quality_gate import cli as cli_mod
+
+        repo = self._git_repo(tmp_path)
+        (repo / "quality-gate.yaml").write_text(
+            "languages:\n  - python\n", encoding="utf-8",
+        )
+        called: list[str] = []
+
+        def fake_rust(repo_root, *, config, checks_list, verbose):
+            called.append("rust")
+            return {}, False
+
+        def fake_ts(repo_root, *, config, checks_list, verbose):
+            called.append("ts")
+            return {}, False
+
+        def fake_python(repo_root, *, config, checks_list, verbose):
+            called.append("python")
+            return {}, False
+
+        monkeypatch.setattr(cli_mod, "_run_rust_checks", fake_rust)
+        monkeypatch.setattr(cli_mod, "_run_ts_checks", fake_ts)
+        monkeypatch.setattr(cli_mod, "_run_python_checks", fake_python)
+
+        monkeypatch.chdir(repo)
+        result = CliRunner().invoke(
+            cli_mod.main, ["check", "--checks", "lint"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert called == ["python"], f"应只跑 python: {called}"
+
+    def test_explicit_all_still_runs_everything(self, tmp_path, monkeypatch):
+        """--lang all 显式 → 覆盖配置跑全部（向后兼容）"""
+        from click.testing import CliRunner
+
+        from quality_gate import cli as cli_mod
+
+        repo = self._git_repo(tmp_path)
+        (repo / "quality-gate.yaml").write_text(
+            "languages:\n  - python\n", encoding="utf-8",
+        )
+        called: list[str] = []
+
+        def fake_rust(repo_root, *, config, checks_list, verbose):
+            called.append("rust")
+            return {}, False
+
+        def fake_ts(repo_root, *, config, checks_list, verbose):
+            called.append("ts")
+            return {}, False
+
+        def fake_python(repo_root, *, config, checks_list, verbose):
+            called.append("python")
+            return {}, False
+
+        monkeypatch.setattr(cli_mod, "_run_rust_checks", fake_rust)
+        monkeypatch.setattr(cli_mod, "_run_ts_checks", fake_ts)
+        monkeypatch.setattr(cli_mod, "_run_python_checks", fake_python)
+
+        monkeypatch.chdir(repo)
+        result = CliRunner().invoke(
+            cli_mod.main, ["check", "--checks", "lint", "--lang", "all"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert called == ["rust", "ts", "python"], f"应跑全部: {called}"

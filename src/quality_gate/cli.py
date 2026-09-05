@@ -21,7 +21,12 @@ from .checkers.rust_lint import check_rust_lint_incremental
 from .checkers.smell import check_smell_incremental
 from .checkers.ts_coverage import check_ts_coverage_incremental
 from .checkers.ts_lint import check_ts_lint_incremental
-from .config import QualityGateConfig, build_smell_config, smell_effective_ignore_paths
+from .config import (
+    QualityGateConfig,
+    build_smell_config,
+    resolve_languages,
+    smell_effective_ignore_paths,
+)
 
 CHECK_TYPES = ["lint", "coverage", "duplication", "complexity", "dependency", "smell"]
 
@@ -72,8 +77,8 @@ def main():
 @click.option(
     "--lang",
     type=click.Choice(["rust", "ts", "python", "all"]),
-    default="all",
-    help="检查的语言"
+    default=None,
+    help="检查的语言（默认按 quality-gate.yaml languages；all = 全部语言）"
 )
 @click.option(
     "--checks",
@@ -115,19 +120,24 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
     if verbose:
         click.echo(f"📄 使用配置：{config.config_path or '默认配置'}")
 
+    # 语言集合：--lang 未显式给 → 按配置 languages（A 包：声明语言才跑）
+    langs = resolve_languages(config, lang)
+    if verbose:
+        click.echo(f"📄 检查语言: {', '.join(langs)}")
+
     ensure_in_git_repo()
     repo_root = Path.cwd()
     results: dict = {"checks_run": checks_list}
 
     exit_code = 0
 
-    # 各语言检查（守卫 lang ∈ {语言名, all}）
+    # 各语言检查（只跑解析后的语言集合）
     for lang_name, runner in (
         ("rust", _run_rust_checks),
         ("ts", _run_ts_checks),
         ("python", _run_python_checks),
     ):
-        if lang in (lang_name, "all"):
+        if lang_name in langs:
             results[lang_name], blocked = runner(
                 repo_root, config=config, checks_list=checks_list, verbose=verbose,
             )
@@ -360,8 +370,8 @@ def _print_issues(issues: list, max_show: int = 5):
 @click.option(
     "--lang",
     type=click.Choice(["rust", "ts", "python", "all"]),
-    default="all",
-    help="扫描的语言"
+    default=None,
+    help="扫描的语言（默认按 quality-gate.yaml languages；all = 全部语言）"
 )
 @click.option(
     "--output",
@@ -400,7 +410,10 @@ def scan(lang: str, output: str | None, no_archive: bool, verbose: bool):
     click.echo("📊 全仓扫描（周报模式）...")
     results = run_full_scan(repo_root, lang=lang, verbose=verbose)
 
-    report = _build_scan_report(repo_root, lang, results)
+    # 报告记录实际语言范围：--lang 未给时 = 配置 languages（解析后列表）
+    config = QualityGateConfig()
+    actual_lang = lang if lang is not None else resolve_languages(config, None)
+    report = _build_scan_report(repo_root, actual_lang, results)
 
     if output:
         _write_scan_report(output, report)
@@ -413,7 +426,9 @@ def scan(lang: str, output: str | None, no_archive: bool, verbose: bool):
     sys.exit(0)
 
 
-def _build_scan_report(repo_root: Path, lang: str, results: dict) -> dict:
+def _build_scan_report(
+    repo_root: Path, lang: str | list[str], results: dict,
+) -> dict:
     """组装 scan 报告（schema/timestamp/cwd/results/summary）"""
     report = {
         "schema_version": 1,

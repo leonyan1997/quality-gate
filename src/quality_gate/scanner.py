@@ -35,7 +35,12 @@ from .checkers.python_lint import check_python_lint_incremental
 from .checkers.rust_lint import check_rust_lint_incremental
 from .checkers.smell import check_smell_incremental
 from .checkers.ts_lint import check_ts_lint_incremental
-from .config import QualityGateConfig, build_smell_config, smell_effective_ignore_paths
+from .config import (
+    QualityGateConfig,
+    build_smell_config,
+    resolve_languages,
+    smell_effective_ignore_paths,
+)
 
 # 存档目录: <repo>/.quality-gate/history/scan-<timestamp>.json
 HISTORY_SUBDIR = ".quality-gate/history"
@@ -76,22 +81,27 @@ def _count_duplication_blocks(results: dict[str, Any]) -> int:
 
 def run_full_scan(
     repo_root: Path,
-    lang: str = "all",
+    lang: str | None = None,
     verbose: bool = False,
 ) -> dict[str, Any]:
-    """执行全仓扫描（full 模式），返回与 check 同构的 results 结构"""
+    """执行全仓扫描（full 模式），返回与 check 同构的 results 结构
+
+    lang: None → 按 config.languages（声明语言才跑，A 包）；"all" → 全部；
+    语言名 → 只跑该语言。
+    """
     config = QualityGateConfig()
+    langs = resolve_languages(config, lang)
     results: dict[str, Any] = {"checks_run": DEFAULT_SCAN_CHECKS}
 
     click_echo = (lambda msg: sys.stdout.write(msg + "\n")) if verbose else (lambda msg: None)
 
-    # 各语言全量扫描（守卫 lang ∈ {语言名, all}）
+    # 各语言全量扫描（只跑解析后的语言集合）
     for lang_name, label, runner in (
         ("rust", "Rust", _scan_rust),
         ("ts", "TypeScript", _scan_ts),
         ("python", "Python", _scan_python),
     ):
-        if lang in (lang_name, "all"):
+        if lang_name in langs:
             click_echo(f"🔍 扫描 {label} 代码...")
             results[lang_name] = runner(repo_root, config=config, verbose=verbose)
 
