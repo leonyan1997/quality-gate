@@ -81,90 +81,107 @@ def run_full_scan(
 ) -> dict[str, Any]:
     """执行全仓扫描（full 模式），返回与 check 同构的 results 结构"""
     config = QualityGateConfig()
-    lint_ignore_paths = config.lint_ignore_paths
-    cc_threshold = config.get_threshold("cyclomatic_complexity", 15)
-    crap_threshold = config.get_threshold("crap", 30)
-    min_tokens = config.get_threshold("min_tokens", 50)
-    min_lines = config.get_threshold("min_lines", 5)
-    dup_threshold = config.get_threshold("duplication", 3.0)
-    smell_cfg = build_smell_config(config)
-
     results: dict[str, Any] = {"checks_run": DEFAULT_SCAN_CHECKS}
 
     click_echo = (lambda msg: sys.stdout.write(msg + "\n")) if verbose else (lambda msg: None)
 
-    # Rust
-    if lang in ("rust", "all"):
-        click_echo("🔍 扫描 Rust 代码...")
-        rust_result: dict[str, Any] = {}
-        if "lint" in DEFAULT_SCAN_CHECKS:
-            rust_result["lint"] = check_rust_lint_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                full=True,
-            )
-        if "complexity" in DEFAULT_SCAN_CHECKS:
-            rust_result["complexity"] = check_rust_complexity_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                threshold=cc_threshold,
-            )
-        if "dependency" in DEFAULT_SCAN_CHECKS:
-            rust_result["dependency"] = check_dependency_incremental(
-                repo_root, lang="rust", verbose=verbose,
-            )
-        results["rust"] = rust_result
-
-    # TypeScript
-    if lang in ("ts", "all"):
-        click_echo("🔍 扫描 TypeScript 代码...")
-        ts_result: dict[str, Any] = {}
-        if "lint" in DEFAULT_SCAN_CHECKS:
-            ts_result["lint"] = check_ts_lint_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                full=True,
-            )
-        if "dependency" in DEFAULT_SCAN_CHECKS:
-            ts_result["dependency"] = check_dependency_incremental(
-                repo_root, lang="ts", verbose=verbose,
-            )
-        results["ts"] = ts_result
-
-    # Python
-    if lang in ("python", "all"):
-        click_echo("🔍 扫描 Python 代码...")
-        python_result: dict[str, Any] = {}
-        if "lint" in DEFAULT_SCAN_CHECKS:
-            python_result["lint"] = check_python_lint_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                full=True,
-            )
-        if "complexity" in DEFAULT_SCAN_CHECKS:
-            python_result["complexity"] = check_python_crap_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                crap_threshold=crap_threshold,
-            )
-        if "dependency" in DEFAULT_SCAN_CHECKS:
-            python_result["dependency"] = check_dependency_incremental(
-                repo_root, lang="python", verbose=verbose,
-            )
-        if "smell" in DEFAULT_SCAN_CHECKS:
-            python_result["smell"] = check_smell_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                full=True, smell_config=smell_cfg,
-            )
-        results["python"] = python_result
+    # 各语言全量扫描（守卫 lang ∈ {语言名, all}）
+    for lang_name, label, runner in (
+        ("rust", "Rust", _scan_rust),
+        ("ts", "TypeScript", _scan_ts),
+        ("python", "Python", _scan_python),
+    ):
+        if lang in (lang_name, "all"):
+            click_echo(f"🔍 扫描 {label} 代码...")
+            results[lang_name] = runner(repo_root, config=config, verbose=verbose)
 
     # 重复代码（语言无关，跑一次）
     if "duplication" in DEFAULT_SCAN_CHECKS:
-        results["duplication"] = check_duplication_incremental(
-            repo_root, verbose=verbose,
-            threshold=dup_threshold,
-            min_tokens=min_tokens,
-            min_lines=min_lines,
-            ignore_paths=lint_ignore_paths,
-            full=True,
+        results["duplication"] = _scan_duplication(
+            repo_root, config=config, verbose=verbose,
         )
 
     return results
+
+
+def _scan_rust(
+    repo_root: Path, *, config: QualityGateConfig, verbose: bool,
+) -> dict[str, Any]:
+    """Rust 全量扫描：lint(CRAP/complexity)/dependency，按 scan 周报默认集"""
+    result: dict[str, Any] = {}
+    if "lint" in DEFAULT_SCAN_CHECKS:
+        result["lint"] = check_rust_lint_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            full=True,
+        )
+    if "complexity" in DEFAULT_SCAN_CHECKS:
+        result["complexity"] = check_rust_complexity_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            threshold=config.get_threshold("cyclomatic_complexity", 15),
+        )
+    if "dependency" in DEFAULT_SCAN_CHECKS:
+        result["dependency"] = check_dependency_incremental(
+            repo_root, lang="rust", verbose=verbose,
+        )
+    return result
+
+
+def _scan_ts(
+    repo_root: Path, *, config: QualityGateConfig, verbose: bool,
+) -> dict[str, Any]:
+    """TypeScript 全量扫描：lint/dependency"""
+    result: dict[str, Any] = {}
+    if "lint" in DEFAULT_SCAN_CHECKS:
+        result["lint"] = check_ts_lint_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            full=True,
+        )
+    if "dependency" in DEFAULT_SCAN_CHECKS:
+        result["dependency"] = check_dependency_incremental(
+            repo_root, lang="ts", verbose=verbose,
+        )
+    return result
+
+
+def _scan_python(
+    repo_root: Path, *, config: QualityGateConfig, verbose: bool,
+) -> dict[str, Any]:
+    """Python 全量扫描：lint/CRAP/dependency/smell"""
+    result: dict[str, Any] = {}
+    if "lint" in DEFAULT_SCAN_CHECKS:
+        result["lint"] = check_python_lint_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            full=True,
+        )
+    if "complexity" in DEFAULT_SCAN_CHECKS:
+        result["complexity"] = check_python_crap_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            crap_threshold=config.get_threshold("crap", 30),
+        )
+    if "dependency" in DEFAULT_SCAN_CHECKS:
+        result["dependency"] = check_dependency_incremental(
+            repo_root, lang="python", verbose=verbose,
+        )
+    if "smell" in DEFAULT_SCAN_CHECKS:
+        result["smell"] = check_smell_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            full=True, smell_config=build_smell_config(config),
+        )
+    return result
+
+
+def _scan_duplication(
+    repo_root: Path, *, config: QualityGateConfig, verbose: bool,
+) -> dict[str, Any]:
+    """重复代码全量扫描（full 模式，供周报）"""
+    return check_duplication_incremental(
+        repo_root, verbose=verbose,
+        threshold=config.get_threshold("duplication", 3.0),
+        min_tokens=config.get_threshold("min_tokens", 50),
+        min_lines=config.get_threshold("min_lines", 5),
+        ignore_paths=config.lint_ignore_paths,
+        full=True,
+    )
 
 
 def history_dir_for(repo_root: Path) -> Path:

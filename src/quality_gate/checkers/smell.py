@@ -39,6 +39,10 @@ _SKIP_DIRS = {
 }
 
 
+# 行数代理指标豁免（2026-09 决议）：本函数是单一增量算法（diff 范围 →
+# 逐规则重算 → 锚点过滤 → 分级），86 行超出默认 60 属"长而聚焦"，
+# 机械拆分伤连贯性——行数上限只是"长"的代理，不是"杂"的判据。
+# 阈值仍可由 quality-gate.yaml smell.max_function_lines 覆盖。
 def check_smell_incremental(
     repo_root: Path,
     verbose: bool = False,
