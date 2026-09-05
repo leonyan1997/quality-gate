@@ -1,0 +1,47 @@
+# Quality Gate 配置文件
+
+# 启用的语言
+languages:
+  - rust
+  - typescript
+  - python
+
+# 阈值配置
+thresholds:
+  # CRAP 指数阈值（阶段四启用）
+  crap: 30
+  # 圈复杂度阈值
+  cyclomatic_complexity: 15
+  # 重复代码百分比阈值（新增重复行 / 新增总行）
+  duplication: 3
+  # jscpd 最小 token 数
+  min_tokens: 50
+  # jscpd 最小行数
+  min_lines: 5
+
+# 覆盖率忽略路径（glob 模式）
+coverage_ignore:
+  paths:
+    - "**/models.py"
+    - "**/schemas.py"
+    - "**/constants.py"
+    - "**/migrations/**"
+    - "**/*.d.ts"
+    - "**/generated/**"
+
+# Lint 忽略路径
+lint_ignore:
+  paths:
+    - "**/generated/**"
+    - "**/node_modules/**"
+    - "**/target/**"
+    - "**/.venv/**"
+    - "**/venv/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - ".quality-gate/**"   # quality-gate 自身产物（scan 存档）
+
+# 函数级忽略（阶段四启用）
+function_ignore:
+  - "legacy_compatibility"
+  - "deprecated_helper"

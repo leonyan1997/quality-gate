@@ -1,0 +1,82 @@
+# Quality Gate CI —— quality-gate 仓库自身 dogfood 门禁（阶段一）
+#
+# 与 .example 的区别: .example 是【使用方模板】（从 YOUR_ORG 克隆工具仓库），
+# 本文件是【工具自身仓库】的门禁——pip install . 装的就是当前 checkout，
+# 用它检查自身代码（增量 lint），吃自己的狗粮。
+#
+# 设计原则:
+#   - quality-gate 不运行单元测试 → 测试由独立 test job 负责（Branch Protection 需同时 required）
+#   - 只卡新增/改动引入的问题（git diff 行过滤），存量债务不阻塞
+#   - job name 必须与 Branch Protection 的 required status check 完全一致：
+#       Quality Gate / Test （勿改 name 字段）
+#
+# 事件语义:
+#   - pull_request → 以 PR base.sha 为 diff 基线（fork PR 幂等 fetch upstream）
+#   - push master  → 以 HEAD~1 为基线（检查合并引入的改动）
+
+name: Quality Gate
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # diff 依赖完整 git 历史
+
+      - name: Set diff base (fork PR 幂等)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # fork PR / 普通 PR 通用：显式 fetch base.sha 建本地 base 分支（幂等，可安全重试）
+            git remote remove upstream 2>/dev/null || true
+            git remote add upstream https://github.com/${{ github.repository }}.git
+            git fetch --depth 1 upstream ${{ github.event.pull_request.base.sha }} \
+              || echo "⚠️ fetch upstream 失败，尝试本地已有对象（fetch-depth 0 已含 base）"
+            git branch --force base ${{ github.event.pull_request.base.sha }}
+            echo "QUALITY_GATE_BASE=base" >> "$GITHUB_ENV"
+          else
+            # push 到 master（合并结果）：相对上一次提交检查
+            echo "QUALITY_GATE_BASE=HEAD~1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install quality-gate (editable 自身) + ruff
+        run: |
+          python3 -m venv /tmp/qg-venv
+          /tmp/qg-venv/bin/pip install --quiet -e . ruff
+
+      - name: Run quality gate (incremental lint, dogfood)
+        run: |
+          export PATH="/tmp/qg-venv/bin:$PATH"
+          quality-gate check --diff --lang python --checks lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install package + pytest
+        run: |
+          python3 -m venv /tmp/qg-venv
+          /tmp/qg-venv/bin/pip install --quiet -e . pytest
+
+      - name: Run tests
+        run: |
+          /tmp/qg-venv/bin/python -m pytest tests/ -q

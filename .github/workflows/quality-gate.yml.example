@@ -1,0 +1,81 @@
+# Quality Gate CI - 增量代码质量门禁（与测试分离）— 使用方模板
+#
+# 本模板供【任意代码项目】复制使用。quality-gate 是独立工具，从它自己的
+# 仓库安装，不要求嵌在使用方仓库内。
+#
+# 设计原则（方案 v2.0）:
+#   - quality-gate 不运行单元/集成测试 → 测试由独立 job 负责
+#   - 只卡新增/改动引入的问题（git diff 行过滤），存量债务不阻塞
+#   - 使用方项目根放一份 quality-gate.yaml（见仓库 quality-gate.yaml.example）
+#
+# 用法:
+#   1. 把本文件复制到 <你的项目>/.github/workflows/quality-gate.yml
+#   2. 把 <YOUR_ORG>/quality-gate 换成工具仓库实际地址（或本地路径）
+#   3. 按需裁剪语言 step（Rust/TS/Python 只要你的项目用到的）
+
+name: Quality Gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality-gate:
+    name: Quality Gate (lint + duplication + dependency)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # diff 依赖完整 git 历史
+
+      - name: Install quality-gate (独立工具仓库)
+        run: |
+          git clone --depth 1 https://github.com/<YOUR_ORG>/quality-gate.git /tmp/quality-gate
+          python3 -m venv /tmp/qg-venv
+          /tmp/qg-venv/bin/pip install -q -e /tmp/quality-gate
+
+      # --- Rust (可选: 项目无 Rust 代码则删) ---
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # --- TypeScript (可选) ---
+      - name: Setup Node + oxlint
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm i -g oxlint@latest jscpd@latest
+
+      # --- Python (可选) ---
+      - name: Install ruff
+        run: /tmp/qg-venv/bin/pip install -q ruff
+
+      - name: Run quality gate (incremental)
+        run: |
+          /tmp/qg-venv/bin/quality-gate check \
+            --lang all \
+            --checks lint,duplication,dependency
+
+  test:
+    name: Tests (unit/integration, quality-gate 不负责)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: rust
+            cmd: cargo test
+          - name: python
+            cmd: python3 -m pytest
+          - name: web
+            cmd: npm ci && npm run test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.name == 'rust'
+      - uses: actions/setup-node@v4
+        if: matrix.name == 'web'
+        with:
+          node-version: 20
+      - name: Run tests
+        run: ${{ matrix.cmd }}

@@ -1,0 +1,33 @@
+[project]
+name = "quality-gate"
+version = "0.1.0"
+description = "自动化代码质量保证 CLI - 增量门禁工具"
+license = "GPL-3.0"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0.0",
+    "json5>=0.9.0",
+    "PyYAML>=6.0",
+    "pathspec>=0.12.0",
+]
+
+[project.scripts]
+quality-gate = "quality_gate.cli:main"
+
+[tool.ruff.lint]
+# 有意设计决策：
+#   PLW1510 - 调用 lint 工具(clippy/ruff)时其返回码=发现问题的数量语义，
+#             必须容忍非零退出以读取 JSON 输出
+#   BLE001  - 外部工具 subprocess 容错：工具缺失/超时应降级报告而非崩溃
+#   S110    - git 命令探测失败时静默降级（返回空结果，由调用方处理）
+#   FIX002  - 不强制 TODO 带 issue 号
+ignore = ["PLW1510", "BLE001", "S110", "FIX002"]
+
+[tool.ruff.lint.per-file-ignores]
+# tests/smell/fixtures/*.py 是故意构造的坏味道样本（供各规则检测用），
+# 其中的 unused import / unused variable / pass 是检测目标而非缺陷
+"tests/smell/fixtures/*.py" = ["F401", "F841", "PIE790"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
