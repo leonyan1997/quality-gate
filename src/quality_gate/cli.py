@@ -28,6 +28,7 @@ from .config import (
     resolve_languages,
     smell_effective_ignore_paths,
 )
+from .fixer import apply_fix
 
 CHECK_TYPES = ["lint", "coverage", "duplication", "complexity", "dependency", "smell"]
 
@@ -561,10 +562,54 @@ def _print_scan_block(key: str, value: dict, max_show: int = 3):
 
 
 @main.command()
-def fix():
-    """自动修复可修复的问题"""
-    click.echo("🔧 自动修复功能开发中...")
-    sys.exit(0)
+@click.option(
+    "--lang",
+    type=click.Choice(["rust", "ts", "python", "all"]),
+    default=None,
+    help="修复的语言（默认按 quality-gate.yaml languages；all = 全部语言）"
+)
+@click.option(
+    "--all",
+    "whole",
+    is_flag=True,
+    help="整仓修复（默认只修 diff 内文件）"
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="显示详细输出"
+)
+def fix(lang: str, whole: bool, verbose: bool):
+    """自动修复可自动修复的 lint 问题（Python/TS；Rust 仅建议）
+
+    默认只处理 diff 内文件；修复后自动复检 lint，仍有阻塞问题 exit 1。
+    完整门禁（含 duplication/dependency/smell 等）请再跑 check --diff。
+    """
+    config = QualityGateConfig()
+    langs = resolve_languages(config, lang)
+    if verbose:
+        click.echo(f"📄 修复语言: {', '.join(langs)}")
+
+    ensure_in_git_repo()
+    repo_root = Path.cwd()
+    outcome = apply_fix(
+        repo_root, langs,
+        ignore_paths=config.lint_ignore_paths,
+        whole=whole, verbose=verbose,
+    )
+
+    click.echo("\n🔧 自动修复结果:")
+    for line in outcome["summary"]:
+        click.echo(f"  {line}")
+
+    if outcome["blocked"]:
+        click.echo(
+            "\n❌ 修复后仍有阻塞 lint 问题——请查看 check --diff 明细继续处理"
+        )
+        sys.exit(1)
+    click.echo(
+        "\n✅ 自动修复完成，无剩余阻塞 lint；完整门禁请跑 quality-gate check --diff"
+    )
 
 
 if __name__ == "__main__":
