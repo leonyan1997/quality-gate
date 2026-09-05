@@ -109,12 +109,6 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
     if unknown:
         click.echo(f"❌ 未知检查类型: {', '.join(unknown)}（可用: {', '.join(CHECK_TYPES)}）")
         sys.exit(2)
-    want_lint = "lint" in checks_list
-    want_coverage = "coverage" in checks_list
-    want_dup = "duplication" in checks_list
-    want_complexity = "complexity" in checks_list
-    want_dependency = "dependency" in checks_list
-    want_smell = "smell" in checks_list
 
     # 加载配置
     config = QualityGateConfig()
@@ -127,128 +121,163 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
 
     exit_code = 0
 
-    # 获取配置中的阈值
-    duplication_threshold = config.get_threshold("duplication", 3.0)
-    min_tokens = config.get_threshold("min_tokens", 50)
-    min_lines = config.get_threshold("min_lines", 5)
-    cc_threshold = config.get_threshold("cyclomatic_complexity", 15)
-    crap_threshold = config.get_threshold("crap", 30)
-    lint_ignore_paths = config.lint_ignore_paths
-    coverage_ignore_paths = config.coverage_ignore_paths
-    smell_cfg = build_smell_config(config)
-
-    # Rust 检查
-    if lang in ["rust", "all"]:
-        click.echo("🔍 检查 Rust 代码...")
-        rust_result = {}
-
-        if want_lint:
-            rust_result["lint"] = check_rust_lint_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
+    # 各语言检查（守卫 lang ∈ {语言名, all}）
+    for lang_name, runner in (
+        ("rust", _run_rust_checks),
+        ("ts", _run_ts_checks),
+        ("python", _run_python_checks),
+    ):
+        if lang in (lang_name, "all"):
+            results[lang_name], blocked = runner(
+                repo_root, config=config, checks_list=checks_list, verbose=verbose,
             )
-            if rust_result["lint"]["blocking"]:
+            if blocked:
                 exit_code = 1
-
-        if want_coverage:
-            rust_result["coverage"] = check_rust_coverage_incremental(
-                repo_root, verbose=verbose, ignore_paths=coverage_ignore_paths,
-            )
-            if rust_result["coverage"]["blocking"]:
-                exit_code = 1
-
-        if want_complexity:
-            rust_result["complexity"] = check_rust_complexity_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                threshold=cc_threshold,
-            )
-            if rust_result["complexity"]["blocking"]:
-                exit_code = 1
-
-        if want_dependency:
-            rust_result["dependency"] = check_dependency_incremental(
-                repo_root, lang="rust", verbose=verbose,
-            )
-            if rust_result["dependency"]["blocking"]:
-                exit_code = 1
-
-        results["rust"] = rust_result
-
-    # TypeScript 检查
-    if lang in ["ts", "all"]:
-        click.echo("🔍 检查 TypeScript 代码...")
-        ts_result = {}
-        if want_lint:
-            ts_result["lint"] = check_ts_lint_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-            )
-            if ts_result["lint"]["blocking"]:
-                exit_code = 1
-        if want_coverage:
-            ts_result["coverage"] = check_ts_coverage_incremental(
-                repo_root, verbose=verbose, ignore_paths=coverage_ignore_paths,
-            )
-            if ts_result["coverage"]["blocking"]:
-                exit_code = 1
-        if want_dependency:
-            ts_result["dependency"] = check_dependency_incremental(
-                repo_root, lang="ts", verbose=verbose,
-            )
-            if ts_result["dependency"]["blocking"]:
-                exit_code = 1
-        results["ts"] = ts_result
-
-    # Python 检查
-    if lang in ["python", "all"]:
-        click.echo("🔍 检查 Python 代码...")
-        python_result = {}
-        if want_lint:
-            python_result["lint"] = check_python_lint_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-            )
-            if python_result["lint"]["blocking"]:
-                exit_code = 1
-        if want_coverage:
-            python_result["coverage"] = check_python_coverage_incremental(
-                repo_root, verbose=verbose, ignore_paths=coverage_ignore_paths,
-            )
-            if python_result["coverage"]["blocking"]:
-                exit_code = 1
-        if want_complexity:
-            python_result["complexity"] = check_python_crap_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                crap_threshold=crap_threshold,
-            )
-            # 阶段一不阻塞
-        if want_dependency:
-            python_result["dependency"] = check_dependency_incremental(
-                repo_root, lang="python", verbose=verbose,
-            )
-            if python_result["dependency"]["blocking"]:
-                exit_code = 1
-        if want_smell:
-            python_result["smell"] = check_smell_incremental(
-                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                smell_config=smell_cfg,
-            )
-            if python_result["smell"]["blocking"]:
-                exit_code = 1
-        results["python"] = python_result
 
     # 重复代码检查（语言无关，跑一次）
-    if want_dup:
-        click.echo("🔍 检查重复代码 (jscpd)...")
-        dup_result = check_duplication_incremental(
-            repo_root, verbose=verbose,
-            threshold=duplication_threshold,
-            min_tokens=min_tokens,
-            min_lines=min_lines,
-            ignore_paths=lint_ignore_paths,
+    if "duplication" in checks_list:
+        dup_result, blocked = _run_duplication_checks(
+            repo_root, config=config, checks_list=checks_list, verbose=verbose,
         )
         results["duplication"] = dup_result
-        if dup_result["blocking"]:
+        if blocked:
             exit_code = 1
 
     # 输出报告
+    _emit_report(diff, results, output, exit_code)
+
+    sys.exit(exit_code)
+
+
+def _run_rust_checks(
+    repo_root: Path,
+    *,
+    config: QualityGateConfig,
+    checks_list: list[str],
+    verbose: bool,
+) -> tuple[dict, bool]:
+    """Rust 检查编排：按 checks_list 分发到各 checker
+
+    返回 (结果字典, 是否阻塞)——阻塞聚合由 check() 统一置 exit_code。
+    """
+    click.echo("🔍 检查 Rust 代码...")
+    result: dict = {}
+    blocked = False
+    if "lint" in checks_list:
+        result["lint"] = check_rust_lint_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+        )
+        blocked = blocked or result["lint"]["blocking"]
+    if "coverage" in checks_list:
+        result["coverage"] = check_rust_coverage_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.coverage_ignore_paths,
+        )
+        blocked = blocked or result["coverage"]["blocking"]
+    if "complexity" in checks_list:
+        result["complexity"] = check_rust_complexity_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            threshold=config.get_threshold("cyclomatic_complexity", 15),
+        )
+        blocked = blocked or result["complexity"]["blocking"]
+    if "dependency" in checks_list:
+        result["dependency"] = check_dependency_incremental(
+            repo_root, lang="rust", verbose=verbose,
+        )
+        blocked = blocked or result["dependency"]["blocking"]
+    return result, blocked
+
+
+def _run_ts_checks(
+    repo_root: Path,
+    *,
+    config: QualityGateConfig,
+    checks_list: list[str],
+    verbose: bool,
+) -> tuple[dict, bool]:
+    """TypeScript 检查编排：lint/coverage/dependency，按 checks_list 分发"""
+    click.echo("🔍 检查 TypeScript 代码...")
+    result: dict = {}
+    blocked = False
+    if "lint" in checks_list:
+        result["lint"] = check_ts_lint_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+        )
+        blocked = blocked or result["lint"]["blocking"]
+    if "coverage" in checks_list:
+        result["coverage"] = check_ts_coverage_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.coverage_ignore_paths,
+        )
+        blocked = blocked or result["coverage"]["blocking"]
+    if "dependency" in checks_list:
+        result["dependency"] = check_dependency_incremental(
+            repo_root, lang="ts", verbose=verbose,
+        )
+        blocked = blocked or result["dependency"]["blocking"]
+    return result, blocked
+
+
+def _run_python_checks(
+    repo_root: Path,
+    *,
+    config: QualityGateConfig,
+    checks_list: list[str],
+    verbose: bool,
+) -> tuple[dict, bool]:
+    """Python 检查编排：lint/coverage/CRAP(不阻塞)/dependency/smell"""
+    click.echo("🔍 检查 Python 代码...")
+    result: dict = {}
+    blocked = False
+    if "lint" in checks_list:
+        result["lint"] = check_python_lint_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+        )
+        blocked = blocked or result["lint"]["blocking"]
+    if "coverage" in checks_list:
+        result["coverage"] = check_python_coverage_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.coverage_ignore_paths,
+        )
+        blocked = blocked or result["coverage"]["blocking"]
+    if "complexity" in checks_list:
+        result["complexity"] = check_python_crap_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            crap_threshold=config.get_threshold("crap", 30),
+        )
+        # 阶段一不阻塞
+    if "dependency" in checks_list:
+        result["dependency"] = check_dependency_incremental(
+            repo_root, lang="python", verbose=verbose,
+        )
+        blocked = blocked or result["dependency"]["blocking"]
+    if "smell" in checks_list:
+        result["smell"] = check_smell_incremental(
+            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            smell_config=build_smell_config(config),
+        )
+        blocked = blocked or result["smell"]["blocking"]
+    return result, blocked
+
+
+def _run_duplication_checks(
+    repo_root: Path,
+    *,
+    config: QualityGateConfig,
+    checks_list: list[str],
+    verbose: bool,
+) -> tuple[dict, bool]:
+    """重复代码检查（语言无关，跑一次）"""
+    click.echo("🔍 检查重复代码 (jscpd)...")
+    result = check_duplication_incremental(
+        repo_root, verbose=verbose,
+        threshold=config.get_threshold("duplication", 3.0),
+        min_tokens=config.get_threshold("min_tokens", 50),
+        min_lines=config.get_threshold("min_lines", 5),
+        ignore_paths=config.lint_ignore_paths,
+    )
+    return result, result["blocking"]
+
+
+def _emit_report(diff: bool, results: dict, output: str | None, exit_code: int) -> None:
+    """输出报告：--output 写 JSON 文件，否则 stdout 摘要 + 最终门禁结论"""
     report = {
         "success": exit_code == 0,
         "diff_mode": diff,
@@ -269,8 +298,6 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
         click.echo("\n✅ 质量门禁通过")
     else:
         click.echo("\n❌ 质量门禁失败 - 请修复上述问题")
-
-    sys.exit(exit_code)
 
 
 def _print_summary(results: dict):
