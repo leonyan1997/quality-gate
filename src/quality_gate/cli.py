@@ -135,6 +135,7 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
     crap_threshold = config.get_threshold("crap", 30)
     lint_ignore_paths = config.lint_ignore_paths
     coverage_ignore_paths = config.coverage_ignore_paths
+    smell_cfg = config.build_smell_config()
 
     # Rust 检查
     if lang in ["rust", "all"]:
@@ -227,6 +228,7 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
         if want_smell:
             python_result["smell"] = check_smell_incremental(
                 repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
+                smell_config=smell_cfg,
             )
             if python_result["smell"]["blocking"]:
                 exit_code = 1

@@ -44,12 +44,16 @@ def check_smell_incremental(
     verbose: bool = False,
     ignore_paths: list[str] | None = None,
     full: bool = False,
+    smell_config: SmellConfig | None = None,
 ) -> dict[str, Any]:
     """结构坏味道增量检查
 
     full=False (默认): 增量门禁——只评估 diff 触及的函数/类体与命中 diff
     的 def/import 行，P0/P1 阻塞、P2 仅报告。
     full=True: 全仓扫描（scan 周报用），全部存量坏味道都进 issues/report。
+
+    smell_config: 由 quality-gate.yaml 的 smell 段构建的阈值配置
+    （QualityGateConfig.build_smell_config()）；缺省用 SmellConfig 默认。
     """
     if ignore_paths is None:
         ignore_paths = []
@@ -62,7 +66,7 @@ def check_smell_incremental(
         "tool": "smell-rules",
     }
 
-    config = SmellConfig()
+    config = smell_config if smell_config is not None else SmellConfig()
 
     if full:
         py_files = sorted(

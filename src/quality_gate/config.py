@@ -3,10 +3,14 @@
 加载 quality-gate.yaml，提供阈值、忽略路径等配置。
 """
 
+import copy
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, ClassVar
 
 import yaml
+
+from .smell.types import SmellConfig
 
 
 class QualityGateConfig:
@@ -49,6 +53,19 @@ class QualityGateConfig:
             "legacy_compatibility",
             "deprecated_helper",
         ],
+        # smell 引擎（Python 结构坏味道）阈值——键名与 SmellConfig 字段对齐，
+        # 默认值以 smell/types.py SmellConfig dataclass 为单一事实源，此处
+        # 仅为 example/合并提供完整形态
+        "smell": {
+            "max_function_lines": 40,
+            "max_class_methods": 10,
+            "max_class_lines": 300,
+            "max_parameters": 5,
+            "max_switch_branches": 3,
+            "min_lazy_class_methods": 2,
+            "enabled_rules": [],
+            "disabled_rules": [],
+        },
     }
 
     def __init__(self, config_path: Path | None = None):
@@ -61,7 +78,10 @@ class QualityGateConfig:
         4. 使用默认配置
         """
         self.config_path = config_path
-        self.config = self.DEFAULT_CONFIG.copy()
+        # 深拷贝默认配置：嵌套段（thresholds/smell/lint_ignore...）若浅拷贝则与
+        # 类级 DEFAULT_CONFIG 共享引用，_merge_config 的 update 会原地污染类级
+        # 默认，泄漏给后续实例（配置合并单测可复现）
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
 
         if config_path and config_path.exists():
             self._load_from_file(config_path)
@@ -141,6 +161,25 @@ class QualityGateConfig:
     def function_ignore(self) -> list[str]:
         """函数级忽略列表"""
         return self.config.get("function_ignore", [])
+
+    def build_smell_config(self) -> SmellConfig:
+        """构建 smell 引擎配置：quality-gate.yaml 的 smell 段覆盖 SmellConfig 默认
+
+        覆盖键直接映射 SmellConfig dataclass 字段（阈值 + enabled/disabled_rules），
+        非法/None 键跳过；未覆盖项回落 smell.types.SmellConfig 字段默认值
+        （单一事实源在 dataclass，此处不复制默认值防漂移）。
+        """
+        smell_cfg = self.config.get("smell") or {}
+        valid = {f.name for f in fields(SmellConfig)}
+        kwargs: dict[str, Any] = {}
+        for key, value in smell_cfg.items():
+            if key not in valid or value is None:
+                continue
+            # [] 与 None 同为"不限/不排除"，统一归一为 None（SmellConfig 语义）
+            if key in ("enabled_rules", "disabled_rules"):
+                value = value or None
+            kwargs[key] = value
+        return SmellConfig(**kwargs)
 
     def should_ignore_coverage(self, filepath: str) -> bool:
         """判断文件是否应该忽略覆盖率检查"""

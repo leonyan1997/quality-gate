@@ -87,6 +87,7 @@ def run_full_scan(
     min_tokens = config.get_threshold("min_tokens", 50)
     min_lines = config.get_threshold("min_lines", 5)
     dup_threshold = config.get_threshold("duplication", 3.0)
+    smell_cfg = config.build_smell_config()
 
     results: dict[str, Any] = {"checks_run": DEFAULT_SCAN_CHECKS}
 
@@ -148,7 +149,7 @@ def run_full_scan(
         if "smell" in DEFAULT_SCAN_CHECKS:
             python_result["smell"] = check_smell_incremental(
                 repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
-                full=True,
+                full=True, smell_config=smell_cfg,
             )
         results["python"] = python_result
 

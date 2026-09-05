@@ -45,3 +45,22 @@ lint_ignore:
 function_ignore:
   - "legacy_compatibility"
   - "deprecated_helper"
+
+# 结构坏味道（smell，Python AST 规则引擎）
+# 键名 = SmellConfig 字段；省略的项用引擎内置默认（40 行/10 方法/300 行/5 参数/3 分支/2 方法）
+smell:
+  # 函数体超过该行数 → long-method（P0，阻塞）
+  max_function_lines: 40
+  # 类方法数 / 类行数超限 → large-class（P1，阻塞）
+  max_class_methods: 10
+  max_class_lines: 300
+  # 参数超过该数 → long-parameter-list（P1，阻塞）
+  max_parameters: 5
+  # match/case 分支超过该数 → switch-statements（P2，仅报告）
+  max_switch_branches: 3
+  # 方法数不超过该值的类 → lazy-class（P2，仅报告）
+  min_lazy_class_methods: 2
+  # 只运行指定规则（不写 = 全部启用）；例: ["long-method", "dead-import"]
+  enabled_rules: []
+  # 排除指定规则（不写 = 不排除）；例: ["data-class"]
+  disabled_rules: []

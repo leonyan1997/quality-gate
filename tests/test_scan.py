@@ -11,6 +11,7 @@ import json
 
 from quality_gate import scanner
 from quality_gate.cli import _scan_summary
+from quality_gate.smell.types import SmellConfig
 
 
 def _lint_result(n: int, skipped: str | None = None) -> dict:
@@ -123,8 +124,10 @@ class TestRunFullScan:
                             threshold=15):
             return {"blocking": False, "issues": [], "report_only_issues": []}
 
-        def fake_smell(repo_root, verbose=False, ignore_paths=None, full=False):
+        def fake_smell(repo_root, verbose=False, ignore_paths=None, full=False,
+                       smell_config=None):
             calls["smell_full"] = full
+            calls["smell_cfg"] = smell_config
             return _smell_result(0)
 
         monkeypatch.setattr(scanner, "check_python_lint_incremental", fake_py_lint)
@@ -147,6 +150,9 @@ class TestRunFullScan:
         # smell 挂 python 分支，full=True（无需 git diff，全量评估）
         assert calls["smell_full"] is True
         assert "smell" in results["python"]
+        # yaml smell 段配置贯通：build_smell_config() 结果传入 checker
+        assert isinstance(calls["smell_cfg"], SmellConfig)
+        assert calls["smell_cfg"].max_function_lines == 40
         # dependency 按语言分发
         assert calls["dep_lang"] in ("rust", "ts", "python")
         # 结构: rust/ts/python 各含 lint(+dependency/complexity), duplication 顶层

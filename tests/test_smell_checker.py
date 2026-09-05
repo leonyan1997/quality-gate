@@ -202,3 +202,55 @@ class TestFullModeAndCli:
         assert result.exit_code == 2
         assert "未知检查类型" in result.output
         assert "smell" in result.output
+
+
+class TestConfiguredThresholds:
+    """quality-gate.yaml 的 smell 段 → 检查器端到端生效"""
+
+    def _build_cfg(self, repo: Path):
+        from quality_gate.config import QualityGateConfig
+
+        return QualityGateConfig(config_path=repo / "quality-gate.yaml")
+
+    def _mk_yaml_repo(self, tmp_path: Path, yaml_body: str, source: str) -> Path:
+        repo = _init_repo(tmp_path, {"app.py": "x = 1\n"})
+        (repo / "quality-gate.yaml").write_text(yaml_body, encoding="utf-8")
+        (repo / "app.py").write_text(source, encoding="utf-8")
+        return repo
+
+    def test_tightened_threshold_blocks_grown_function(self, tmp_path):
+        """yaml 收紧 max_function_lines=5 → 8 行函数被 diff 触及即阻塞"""
+        from quality_gate.smell.types import SmellConfig
+
+        repo = self._mk_yaml_repo(
+            tmp_path,
+            "smell:\n  max_function_lines: 5\n",
+            "def f():\n" + "    pass\n" * 8,   # 默认 40 不报，收紧后报
+        )
+        smell_cfg = self._build_cfg(repo).build_smell_config()
+        assert isinstance(smell_cfg, SmellConfig)
+        assert smell_cfg.max_function_lines == 5
+
+        res = check_smell_incremental(repo, smell_config=smell_cfg)
+
+        assert res["blocking"] is True
+        long_method = next(i for i in res["issues"] if i["code"] == "long-method")
+        assert long_method["severity"] == "P0"
+
+    def test_disabled_rule_not_reported(self, tmp_path):
+        """yaml disabled_rules 排除 long-method → 同场景不阻塞"""
+        repo = self._mk_yaml_repo(
+            tmp_path,
+            "smell:\n"
+            "  max_function_lines: 5\n"
+            "  disabled_rules:\n"
+            "    - long-method\n",
+            "def f():\n" + "    pass\n" * 8,
+        )
+        smell_cfg = self._build_cfg(repo).build_smell_config()
+        assert smell_cfg.disabled_rules == ["long-method"]
+
+        res = check_smell_incremental(repo, smell_config=smell_cfg)
+
+        assert res["blocking"] is False
+        assert all(i["code"] != "long-method" for i in res["issues"])

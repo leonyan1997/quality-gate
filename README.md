@@ -93,10 +93,10 @@ quality-gate scan --no-archive
 
 scan 与 check 的区别:
 - **check** 是增量门禁：git diff 过滤、只卡新增问题、exit 1 阻塞
-- **scan** 是全仓快照：报告全部存量问题（lint/重复/依赖/CRAP）、**不阻塞**
+- **scan** 是全仓快照：报告全部存量问题（lint/重复/依赖/CRAP/smell）、**不阻塞**
   （无论多少问题 exit code 都是 0，工具级错误除外）
 - 每次 scan 结果存档到 `.quality-gate/history/scan-<ts>.json`（毫秒级时间戳防同秒覆盖），
-  与上次对比输出周报趋势：lint/重复块/CRAP 计数变化 + 新增/消失的高 CRAP 函数明细
+  与上次对比输出周报趋势：lint/重复块/CRAP/smell 计数变化 + 新增/消失的高 CRAP 函数明细
 - 趋势对比的 baseline 在保存前取，避免刚存的报告恒为"最新"导致对比失效
 
 ## 检查项
@@ -111,12 +111,38 @@ scan 与 check 的区别:
 | 覆盖率 | ✅ tarpaulin | ✅ vitest | ✅ coverage.py | 新增文件 >0%（TS 基于 json-summary，Python 基于 coverage.json） |
 | 圈复杂度 | ✅ clippy | ✅ eslint | ⏸️ radon | 新增文件阻塞（Python CRAP 报告不阻塞） |
 | CRAP 报告 | ⏸️ | ⏸️ | ✅ radon | 当前仅报告（crap-index 已有） |
+| 结构坏味道 | ⏸️ | ⏸️ | ✅ AST 规则 | 8 条规则引擎；增量 P0/P1 阻塞、P2 仅报告 |
 
 ### 已实现：scan 全仓扫描与覆盖率扩展
 
 - ✅ TS/Python 覆盖率在 web/、tests/ 实机跑通（vitest/coverage 需项目自带配置）
 - ✅ scan 全仓扫描命令落地（full 模式 + 存档 + 周报趋势对比）
 - ✅ CRAP 趋势报告（函数级新增/消失对比）
+
+### 已实现：结构坏味道引擎（smell）
+
+Python 结构坏味道由内置 AST 规则引擎检测（8 条规则：long-method /
+large-class / long-parameter-list / dead-import / dead-code /
+switch-statements / data-class / lazy-class），三条命令的行为差异：
+
+| 命令 | smell 行为 |
+|------|-----------|
+| `check --diff` | ✅ 增量门禁：只评估 diff 触及的函数/类体与命中 diff 的 def/import 行。P0/P1（long-method / large-class / long-parameter-list / dead-import）进 issues 阻塞，exit 1；P2（其余 4 条）仅报告不阻塞 |
+| `scan` | ✅ 全仓快照：`full` 模式报告全部存量坏味道（含 P2），不阻塞（exit 0）；计数入 `.quality-gate/history` 存档与周报趋势 |
+| `fix` | ❌ 不处理：结构问题需要人工重构判断，自动修复只覆盖 lint 级问题 |
+
+增量语义说明（check --diff）：
+
+- **行级规则**（long-parameter-list / dead-import）：def/import 行被 diff
+  命中才上报——存量超参函数只改函数体不会重报
+- **块级规则**（long-method / large-class / lazy-class / data-class /
+  switch-statements / dead-code）：diff 触及该函数/类体即重算整块——
+  往超长函数里加代码会立即被卡
+- 新增/untracked 文件按全文件评估（diff = 全文，天然全量）
+- 存量坏味道在 diff 外 → 永不阻塞，债务自然收敛
+
+严重度映射：P0 = long-method；P1 = large-class / long-parameter-list /
+dead-import；P2 = lazy-class / dead-code / data-class / switch-statements。
 
 ### 阶段三（测试质量 · 规划中）
 
@@ -157,7 +183,21 @@ lint_ignore:
   paths:
     - "**/node_modules/**"
     - "**/target/**"
+
+smell:
+  max_function_lines: 40      # 函数体超过 → long-method（P0 阻塞）
+  max_class_methods: 10       # 类方法数超过 → large-class（P1 阻塞）
+  max_class_lines: 300        # 类行数超过 → large-class
+  max_parameters: 5           # 参数超过 → long-parameter-list（P1 阻塞）
+  max_switch_branches: 3      # 分支超过 → switch-statements（P2 报告）
+  min_lazy_class_methods: 2   # 方法数 ≤ → lazy-class（P2 报告）
+  enabled_rules: []           # 只启用指定规则（空 = 全部启用）
+  disabled_rules: []          # 排除指定规则（空 = 不排除）
 ```
+
+smell 段可省略——未配置时全部阈值用引擎内置默认（上例数值即默认值）。
+各命令下的 smell 行为差异见「已实现：结构坏味道引擎（smell）」一节；
+完整规则与阈值定义见 `src/quality_gate/smell/`。
 
 ## CI 集成
 
@@ -283,8 +323,9 @@ master 分支建议启用原生 Branch Protection，required status checks 勾�
 - ✅ 架构依赖检查 (cargo-deny / depcruise / import-linter)
 - ✅ 覆盖率 (Rust tarpaulin / TS vitest / Python coverage.py)
 - ✅ 圈复杂度 + Python CRAP 报告
-- ✅ 配置文件加载 (quality-gate.yaml)
+- ✅ 配置文件加载 (quality-gate.yaml，含 smell 阈值段)
 - ✅ scan 全仓扫描（full 模式 + report 存档 + 周报趋势 + CRAP 函数级明细）
+- ✅ 结构坏味道引擎（smell：8 条 AST 规则，check --diff 增量门禁 + scan 全量报告）
 
 ### 阶段一：门禁生效（当前）
 - [x] GitHub Actions workflow（本仓库 dogfood 版 + 使用方模板）
