@@ -63,6 +63,31 @@ def check_rust_complexity_incremental(
             print("  无新增 Rust 文件，跳过复杂度检查")
         return result
 
+    stdout, error_issue = _run_clippy_complexity(repo_root)
+    if error_issue is not None:
+        result["issues"].append(error_issue)
+        return result
+
+    for issue in _complexity_issues(stdout, repo_root, ignore_paths):
+        if issue["file"] in added_files:
+            # 新增文件: 超阈值阻塞；clippy 报警即超其配置阈值 → 保守阻塞
+            if issue["complexity"] is not None and issue["complexity"] > threshold:
+                issue["level"] = "error"
+            result["issues"].append(issue)
+            result["blocking"] = True
+        else:
+            # 修改/存量文件: 仅报告
+            result["report_only_issues"].append(issue)
+
+    if verbose:
+        print(f"  复杂度问题: {len(result['issues'])} 阻塞 / {len(result['report_only_issues'])} 报告")
+    return result
+
+
+def _run_clippy_complexity(
+    repo_root: Path,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """运行 clippy cyclomatic_complexity；成功 (stdout, None)，失败 (None, issue)"""
     try:
         clippy_result = subprocess.run(
             [
@@ -75,85 +100,80 @@ def check_rust_complexity_incremental(
             timeout=600,
         )
     except FileNotFoundError:
-        result["issues"].append({
+        return None, {
             "file": "clippy", "line": 0, "column": 0, "level": "error",
             "code": "not_found",
             "message": "cargo/clippy 未安装，无法执行复杂度检查",
-        })
-        return result
+        }
     except subprocess.TimeoutExpired:
-        result["issues"].append({
+        return None, {
             "file": "clippy", "line": 0, "column": 0, "level": "error",
             "code": "timeout",
             "message": "clippy 复杂度检查超时 (>10 分钟)",
-        })
-        return result
-
-    for line in (clippy_result.stdout or "").split("\n"):
-        if not line.strip():
-            continue
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        if msg.get("reason") != "compiler-message":
-            continue
-
-        diagnostic = msg.get("message", {})
-        # 只关心 cyclomatic_complexity lint
-        code = diagnostic.get("code", {}).get("code", "")
-        if "cyclomatic_complexity" not in code:
-            continue
-
-        spans = diagnostic.get("spans", [])
-        if not spans:
-            continue
-        primary = next((s for s in spans if s.get("is_primary")), spans[0])
-
-        filepath = primary.get("file_name", "")
-        line_num = primary.get("line_start", 0)
-        if not filepath or filepath.endswith(".rs") is False:
-            continue
-        if filepath.startswith("/") or "target/" in filepath:
-            continue
-
-        rel_path = Path(filepath).as_posix()
-        if matches_ignore_patterns(rel_path, ignore_paths):
-            continue
-
-        message_text = diagnostic.get("message", "")
-        # 提取复杂度数值，如 "cyclomatic complexity of `fn` (N)" 或 lint 消息格式
-        complexity_val = extract_complexity(message_text)
-
-        issue = {
-            "file": rel_path,
-            "line": line_num,
-            "column": primary.get("column_start", 0),
-            "level": "warning",
-            "code": code,
-            "message": message_text,
-            "complexity": complexity_val,
-            "function": extract_function_name(message_text),
         }
+    return clippy_result.stdout, None
 
-        if rel_path in added_files:
-            # 新增文件: 超阈值阻塞
-            if complexity_val is not None and complexity_val > threshold:
-                issue["level"] = "error"
-                result["issues"].append(issue)
-                result["blocking"] = True
-            else:
-                # clippy 已报警告意味着超 clippy 阈值；保守处理
-                result["issues"].append(issue)
-                result["blocking"] = True
-        else:
-            # 修改文件: 仅报告
-            result["report_only_issues"].append(issue)
 
-    if verbose:
-        print(f"  复杂度问题: {len(result['issues'])} 阻塞 / {len(result['report_only_issues'])} 报告")
-    return result
+def _complexity_issues(
+    stdout: str,
+    repo_root: Path,
+    ignore_paths: list[str],
+) -> list[dict[str, Any]]:
+    """clippy JSON-Lines → 复杂度 issue 列表（仅 cyclomatic_complexity lint）"""
+    issues: list[dict[str, Any]] = []
+    for line in (stdout or "").split("\n"):
+        issue = _parse_complexity_line(line, repo_root, ignore_paths)
+        if issue is not None:
+            issues.append(issue)
+    return issues
+
+
+def _parse_complexity_line(
+    line: str, repo_root: Path, ignore_paths: list[str],
+) -> dict[str, Any] | None:
+    """单行 JSON-Lines → complexity issue；非相关行返回 None"""
+    if not line.strip():
+        return None
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if msg.get("reason") != "compiler-message":
+        return None
+
+    diagnostic = msg.get("message", {})
+    # 只关心 cyclomatic_complexity lint
+    code = diagnostic.get("code", {}).get("code", "")
+    if "cyclomatic_complexity" not in code:
+        return None
+
+    spans = diagnostic.get("spans", [])
+    if not spans:
+        return None
+    primary = next((s for s in spans if s.get("is_primary")), spans[0])
+
+    filepath = primary.get("file_name", "")
+    line_num = primary.get("line_start", 0)
+    if not filepath or filepath.endswith(".rs") is False:
+        return None
+    if filepath.startswith("/") or "target/" in filepath:
+        return None
+
+    rel_path = Path(filepath).as_posix()
+    if matches_ignore_patterns(rel_path, ignore_paths):
+        return None
+
+    message_text = diagnostic.get("message", "")
+    return {
+        "file": rel_path,
+        "line": line_num,
+        "column": primary.get("column_start", 0),
+        "level": "warning",
+        "code": code,
+        "message": message_text,
+        "complexity": extract_complexity(message_text),
+        "function": extract_function_name(message_text),
+    }
 
 
 def check_python_crap_incremental(
@@ -179,6 +199,21 @@ def check_python_crap_incremental(
         "note": "阶段一 CRAP 仅报告，阶段三启用阻塞",
     }
 
+    data = _run_radon(repo_root, verbose)
+    if data is None:
+        return result  # radon 缺失/超时/解析失败 → 无数据返回空
+
+    issues = _crap_report_issues(data, repo_root, ignore_paths, crap_threshold)
+    result["report_only_issues"] = issues
+    result["issues"] = list(issues)  # issues/report_only 同内容（阶段一只报告）
+
+    if verbose:
+        print(f"  CRAP 报告: {len(result['issues'])} 个函数超复杂度阈值 (仅报告)")
+    return result
+
+
+def _run_radon(repo_root: Path, verbose: bool) -> dict[str, Any] | None:
+    """运行 radon cc -s -j；成功返回解析后的数据 dict，失败/无数据返回 None"""
     try:
         radon_result = subprocess.run(
             ["radon", "cc", "-s", "-j", "."],
@@ -190,15 +225,25 @@ def check_python_crap_incremental(
     except FileNotFoundError:
         if verbose:
             print("  radon 未安装，跳过 CRAP 报告 (pip install radon)")
-        return result
+        return None
     except subprocess.TimeoutExpired:
-        return result
+        return None
 
     try:
         data = json.loads(radon_result.stdout or "{}")
     except json.JSONDecodeError:
-        return result
+        return None
+    return data if isinstance(data, dict) else None
 
+
+def _crap_report_issues(
+    data: dict[str, Any],
+    repo_root: Path,
+    ignore_paths: list[str],
+    crap_threshold: int,
+) -> list[dict[str, Any]]:
+    """radon 输出 → 超阈值函数报告项（issues/report_only 共用内容）"""
+    issues: list[dict[str, Any]] = []
     for filepath, funcs in data.items():
         rel_path = Path(filepath).as_posix()
         if matches_ignore_patterns(rel_path, ignore_paths):
@@ -208,7 +253,7 @@ def check_python_crap_incremental(
             cc = fn.get("complexity", 0)
             # 无覆盖率数据时按 Cov=0 的 CRAP 下限近似 (仅报告参考)
             if cc >= crap_threshold:
-                result["report_only_issues"].append({
+                issues.append({
                     "file": rel_path,
                     "line": fn.get("lineno", 0),
                     "column": 0,
@@ -221,11 +266,7 @@ def check_python_crap_incremental(
                     "complexity": cc,
                     "function": fn.get("name", ""),
                 })
-                result["issues"].append(result["report_only_issues"][-1])
-
-    if verbose:
-        print(f"  CRAP 报告: {len(result['issues'])} 个函数超复杂度阈值 (仅报告)")
-    return result
+    return issues
 
 
 def extract_complexity(message: str) -> int | None:

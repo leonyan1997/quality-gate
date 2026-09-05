@@ -69,10 +69,21 @@ def _parse_cargo_deny_output(raw: str) -> list[dict[str, Any]] | None:
         list  — 解析出的违规条目（可为空 = 可解析但无 error 级违规）
         None  — 输出完全不可解析（调用方应给汇总级 issue）
     """
+    ndjson_violations = _parse_ndjson_stream(raw)
+    if ndjson_violations is not None:
+        return ndjson_violations
+    return _parse_legacy_object(raw)
+
+
+def _parse_ndjson_stream(raw: str) -> list[dict[str, Any]] | None:
+    """cargo-deny 0.20+ NDJSON 行流解析
+
+    返回:
+        list  — 行流可解析时的违规条目（可为空）
+        None  — 未检出 diagnostic/summary 行（非 NDJSON，交给旧格式兜底）
+    """
     violations: list[dict[str, Any]] = []
     saw_json = False
-
-    # 1) NDJSON 行流优先（cargo-deny 0.20+）
     for line in raw.splitlines():
         line = line.strip()
         if not line:
@@ -90,24 +101,30 @@ def _parse_cargo_deny_output(raw: str) -> list[dict[str, Any]] | None:
         fields = obj.get("fields") or {}
         if fields.get("severity") != "error":
             continue
-        # graphs[0].Krate = 违规 crate（name/version）
-        name, version = "?", ""
-        graphs = fields.get("graphs") or []
-        if graphs and isinstance(graphs[0], dict):
-            krate = (graphs[0].get("Krate") or {})
-            if isinstance(krate, dict):
-                name = krate.get("name") or "?"
-                version = krate.get("version") or ""
-        violations.append({
-            "name": name,
-            "version": version,
-            "kind": fields.get("code", "violation"),
-            "message": fields.get("message", "") or "",
-        })
-    if saw_json:
-        return violations
+        violations.append(_violation_from_fields(fields))
+    return violations if saw_json else None
 
-    # 2) 旧版单对象格式兜底: {"bans": {"error": [...]}}
+
+def _violation_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """diagnostic.fields → 违规条目（graphs[0].Krate = 违规 crate）"""
+    name, version = "?", ""
+    graphs = fields.get("graphs") or []
+    if graphs and isinstance(graphs[0], dict):
+        krate = graphs[0].get("Krate") or {}
+        if isinstance(krate, dict):
+            name = krate.get("name") or "?"
+            version = krate.get("version") or ""
+    return {
+        "name": name,
+        "version": version,
+        "kind": fields.get("code", "violation"),
+        "message": fields.get("message", "") or "",
+    }
+
+
+def _parse_legacy_object(raw: str) -> list[dict[str, Any]] | None:
+    """旧版 cargo-deny 单对象格式兜底: {"bans": {"error": [...]}}"""
+    violations: list[dict[str, Any]] = []
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
