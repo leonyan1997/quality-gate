@@ -112,7 +112,8 @@ def test_duplication_untracked_new_file_blocks(git_repo, monkeypatch):
         "lines": 20, "tokens": 60, "format": "python",
     }])
     _stub_jscpd(monkeypatch, _make_proc(1, payload))
-    result = dup.check_duplication_incremental(git_repo, threshold=3.0)
+    result = dup.check_duplication_incremental(
+        git_repo, options=dup.DupOptions(threshold=3.0))
     assert result["blocking"] is True
     assert result["total_added_lines"] == 20
     assert result["duplicated_added_lines"] == 20
@@ -127,7 +128,8 @@ def test_duplication_below_threshold_passes(git_repo, monkeypatch):
     )
     payload = _make_jscpd_json([])
     _stub_jscpd(monkeypatch, _make_proc(0, payload))
-    result = dup.check_duplication_incremental(git_repo, threshold=3.0)
+    result = dup.check_duplication_incremental(
+        git_repo, options=dup.DupOptions(threshold=3.0))
     assert result["blocking"] is False
     assert result["duplication_rate"] == 0.0
     assert result["total_added_lines"] == 6
@@ -155,7 +157,8 @@ def test_duplication_in_untouched_file_not_blocking(git_repo, monkeypatch):
         "lines": 20, "tokens": 60, "format": "python",
     }])
     _stub_jscpd(monkeypatch, _make_proc(1, payload))
-    result = dup.check_duplication_incremental(git_repo, threshold=3.0)
+    result = dup.check_duplication_incremental(
+        git_repo, options=dup.DupOptions(threshold=3.0))
     assert result["blocking"] is False
     assert result["duplicated_added_lines"] == 0
     assert result["total_added_lines"] == 1
@@ -189,7 +192,8 @@ def test_jscpd_v4_name_with_format_suffix_not_untracked(git_repo, monkeypatch):
         "lines": 20, "tokens": 60, "format": "python",
     }])
     _stub_jscpd(monkeypatch, _make_proc(1, payload))
-    result = dup.check_duplication_incremental(git_repo, threshold=3.0)
+    result = dup.check_duplication_incremental(
+        git_repo, options=dup.DupOptions(threshold=3.0))
     # 存量重复不在 diff → 不阻塞；修复前会误判 20/1 = 2000% 阻塞
     assert result["blocking"] is False
     assert result["duplicated_added_lines"] == 0

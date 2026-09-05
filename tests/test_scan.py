@@ -107,8 +107,7 @@ class TestRunFullScan:
             calls["ts_lint_full"] = full
             return _lint_result(0)
 
-        def fake_dup(repo_root, verbose=False, threshold=3.0, min_tokens=50,
-                     min_lines=5, ignore_paths=None, full=False):
+        def fake_dup(repo_root, verbose=False, options=None, full=False):
             calls["dup_full"] = full
             return _dup_result(0)
 

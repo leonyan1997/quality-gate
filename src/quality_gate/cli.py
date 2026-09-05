@@ -13,7 +13,7 @@ from .checkers.complexity import (
 from .checkers.dependency import (
     check_dependency_incremental,
 )
-from .checkers.duplication import check_duplication_incremental
+from .checkers.duplication import DupOptions, check_duplication_incremental
 from .checkers.python_coverage import check_python_coverage_incremental
 from .checkers.python_lint import check_python_lint_incremental
 from .checkers.rust_coverage import check_rust_coverage_incremental
@@ -270,10 +270,12 @@ def _run_duplication_checks(
     click.echo("🔍 检查重复代码 (jscpd)...")
     result = check_duplication_incremental(
         repo_root, verbose=verbose,
-        threshold=config.get_threshold("duplication", 3.0),
-        min_tokens=config.get_threshold("min_tokens", 50),
-        min_lines=config.get_threshold("min_lines", 5),
-        ignore_paths=config.lint_ignore_paths,
+        options=DupOptions(
+            threshold=config.get_threshold("duplication", 3.0),
+            min_tokens=config.get_threshold("min_tokens", 50),
+            min_lines=config.get_threshold("min_lines", 5),
+            ignore_paths=config.lint_ignore_paths,
+        ),
     )
     return result, result["blocking"]
 
