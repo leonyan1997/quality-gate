@@ -419,22 +419,24 @@ class TestScanSummary:
         }
 
 
+def _make_cli_repo(tmp_path):
+    """最小 git 仓库（CLI 编排测试用：check 依赖真实 git 环境）"""
+    import subprocess
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=T",
+         "-c", "user.email=t@t.t", "commit", "-qm", "init"],
+        check=True,
+    )
+    return repo
+
+
 class TestCliLanguages:
     """cli.check 尊重 config.languages（A 包：声明语言才跑）"""
-
-    def _git_repo(self, tmp_path):
-        import subprocess
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
-        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-        subprocess.run(
-            ["git", "-C", str(repo), "-c", "user.name=T",
-             "-c", "user.email=t@t.t", "commit", "-qm", "init"],
-            check=True,
-        )
-        return repo
 
     def test_python_only_config_skips_rust_ts_checkers(self, tmp_path, monkeypatch):
         """languages=[python] + 缺省 --lang → 只跑 python，不调 rust/ts runner"""
@@ -442,7 +444,7 @@ class TestCliLanguages:
 
         from quality_gate import cli as cli_mod
 
-        repo = self._git_repo(tmp_path)
+        repo = _make_cli_repo(tmp_path)
         (repo / "quality-gate.yaml").write_text(
             "languages:\n  - python\n", encoding="utf-8",
         )
@@ -478,7 +480,7 @@ class TestCliLanguages:
 
         from quality_gate import cli as cli_mod
 
-        repo = self._git_repo(tmp_path)
+        repo = _make_cli_repo(tmp_path)
         (repo / "quality-gate.yaml").write_text(
             "languages:\n  - python\n", encoding="utf-8",
         )
@@ -507,3 +509,61 @@ class TestCliLanguages:
 
         assert result.exit_code == 0, result.output
         assert called == ["rust", "ts", "python"], f"应跑全部: {called}"
+
+
+class TestCliExitCodeSemantics:
+    """门禁 exit-code 契约（B 包：核心项阻塞 exit 1 / 查不了显式跳过 exit 0）
+
+    用真实 cli.check + 替身 runner 模拟各 checker 返回，钉死 CLI 聚合语义：
+      - blocking=True（工具缺失/违规等 error 级）→ exit 1
+      - 显式 skipped（coverage/dependency 扩展项查不了）→ exit 0 且输出可见
+    """
+
+    @staticmethod
+    def _invoke(tmp_path, monkeypatch, checks, lang, outcome):
+        """outcome = (runner_results, blocked)（收拢参数防 long-parameter-list）"""
+        from click.testing import CliRunner
+
+        from quality_gate import cli as cli_mod
+
+        repo = _make_cli_repo(tmp_path)
+        runner_results, blocked = outcome
+
+        def fake_runner(repo_root, *, config, checks_list, verbose):
+            return runner_results, blocked
+
+        monkeypatch.setattr(cli_mod, "_run_python_checks", fake_runner)
+        monkeypatch.setattr(cli_mod, "_run_rust_checks", lambda *a, **k: ({}, False))
+        monkeypatch.setattr(cli_mod, "_run_ts_checks", lambda *a, **k: ({}, False))
+        monkeypatch.setattr(
+            cli_mod, "_run_duplication_checks",
+            lambda *a, **k: ({"blocking": False, "issues": []}, False),
+        )
+
+        monkeypatch.chdir(repo)
+        return CliRunner().invoke(cli_mod.main, ["check", "--checks", checks, "--lang", lang])
+
+    def test_core_blocking_exit_1(self, tmp_path, monkeypatch):
+        """核心项阻塞（如 lint 工具缺失的 error issue）→ exit 1"""
+        blocked_result = {
+            "lint": {
+                "blocking": True,
+                "issues": [{"file": "ruff", "line": 0, "code": "not_found",
+                            "message": "ruff 未安装，请先安装：pip install ruff"}],
+            },
+        }
+        result = self._invoke(tmp_path, monkeypatch, "lint", "python",
+                              (blocked_result, True))
+        assert result.exit_code == 1, result.output
+        assert "质量门禁失败" in result.output
+
+    def test_explicit_skipped_exit_0_and_visible(self, tmp_path, monkeypatch):
+        """coverage 查不了（显式 skipped）→ exit 0 且输出可见原因（不静默绿）"""
+        skipped_result = {
+            "coverage": {"blocking": False, "issues": [],
+                         "skipped": "coverage 不可用且无 coverage.json"},
+        }
+        result = self._invoke(tmp_path, monkeypatch, "coverage", "python",
+                              (skipped_result, False))
+        assert result.exit_code == 0, result.output
+        assert "coverage 不可用" in result.output, f"skipped 原因应在输出可见: {result.output}"

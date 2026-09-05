@@ -199,9 +199,13 @@ def check_python_crap_incremental(
         "note": "阶段一 CRAP 仅报告，阶段三启用阻塞",
     }
 
-    data = _run_radon(repo_root, verbose)
+    data, skip_reason = _run_radon(repo_root)
     if data is None:
-        return result  # radon 缺失/超时/解析失败 → 无数据返回空
+        # B 包语义：radon 查不了必须显式跳过（可见原因），不再静默空结果
+        result["skipped"] = skip_reason
+        if verbose:
+            print(f"  跳过 CRAP 报告: {skip_reason}")
+        return result
 
     issues = _crap_report_issues(data, repo_root, ignore_paths, crap_threshold)
     result["report_only_issues"] = issues
@@ -212,8 +216,12 @@ def check_python_crap_incremental(
     return result
 
 
-def _run_radon(repo_root: Path, verbose: bool) -> dict[str, Any] | None:
-    """运行 radon cc -s -j；成功返回解析后的数据 dict，失败/无数据返回 None"""
+def _run_radon(repo_root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """运行 radon cc -s -j
+
+    返回 (data, None) 成功；(None, skip_reason) 缺失/超时/解析失败——
+    调用方把 skip_reason 写入 result["skipped"]，保证"没查到"对用户可见。
+    """
     try:
         radon_result = subprocess.run(
             ["radon", "cc", "-s", "-j", "."],
@@ -223,17 +231,17 @@ def _run_radon(repo_root: Path, verbose: bool) -> dict[str, Any] | None:
             timeout=300,
         )
     except FileNotFoundError:
-        if verbose:
-            print("  radon 未安装，跳过 CRAP 报告 (pip install radon)")
-        return None
+        return None, "radon 未安装 (pip install radon)，跳过 CRAP 报告"
     except subprocess.TimeoutExpired:
-        return None
+        return None, "radon 执行超时 (>5 分钟)，跳过 CRAP 报告"
 
     try:
         data = json.loads(radon_result.stdout or "{}")
     except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
+        return None, "radon 输出解析失败，跳过 CRAP 报告"
+    if not isinstance(data, dict):
+        return None, "radon 输出格式异常，跳过 CRAP 报告"
+    return data, None
 
 
 def _crap_report_issues(
