@@ -114,8 +114,8 @@ def _stub_full_scan_checkers(monkeypatch, calls: dict) -> None:
         calls["dep_lang"] = lang
         return _dep_result()
 
-    def fake_crap(repo_root, verbose=False, ignore_paths=None,
-                  crap_threshold=30):
+    def fake_crap(repo_root, verbose=False, ignore_paths=None, options=None):
+        calls["crap_full"] = bool(options and options.full)
         return _crap_result(0)
 
     def fake_complexity(repo_root, verbose=False, ignore_paths=None,
@@ -156,6 +156,7 @@ class TestRunFullScan:
         assert calls["dup_full"] is True
         # smell 挂 python 分支，full=True（无需 git diff，全量评估）
         assert calls["smell_full"] is True
+        assert calls["crap_full"] is True  # P1: python CRAP scan 走整仓仅报告
         assert "smell" in results["python"]
         # yaml smell 段配置贯通：build_smell_config() 结果传入 checker
         assert isinstance(calls["smell_cfg"], SmellConfig)

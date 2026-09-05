@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from .checkers.complexity import (
+    CrapOptions,
     check_python_crap_incremental,
     check_rust_complexity_incremental,
 )
@@ -250,9 +251,13 @@ def _run_python_checks(
     if "complexity" in checks_list:
         result["complexity"] = check_python_crap_incremental(
             repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
-            crap_threshold=config.get_threshold("crap", 30),
+            options=CrapOptions(
+                threshold=config.get_threshold("crap", 30),
+                function_ignore=config.function_ignore,
+            ),
         )
-        # 阶段一不阻塞
+        # P1: Python CRAP 增量阻塞——新增 def 且 cc≥阈值 → 阻塞 exit 1
+        blocked = blocked or result["complexity"]["blocking"]
     if "dependency" in checks_list:
         result["dependency"] = check_dependency_incremental(
             repo_root, lang="python", verbose=verbose,

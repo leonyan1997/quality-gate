@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from .checkers.complexity import (
+    CrapOptions,
     check_python_crap_incremental,
     check_rust_complexity_incremental,
 )
@@ -166,7 +167,10 @@ def _scan_python(
     if "complexity" in DEFAULT_SCAN_CHECKS:
         result["complexity"] = check_python_crap_incremental(
             repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
-            crap_threshold=config.get_threshold("crap", 30),
+            options=CrapOptions(
+                threshold=config.get_threshold("crap", 30),
+                full=True,  # scan 周报：整仓仅报告（P1 保持趋势不漂移）
+            ),
         )
     if "dependency" in DEFAULT_SCAN_CHECKS:
         result["dependency"] = check_dependency_incremental(
