@@ -1,6 +1,9 @@
 # Quality Gate 配置文件
 
-# 启用的语言
+# 启用的语言——check/scan 只运行这里声明的语言（A 包语义）：
+# 纯 Python 项目写 python 即可，不会尝试 clippy/oxlint（也不因缺工具误红）。
+# 显式 --lang 覆盖本配置；--lang all 强制全语言。
+# 别名: typescript = ts（其余语言名直接用小写语言名）
 languages:
   - rust
   - typescript

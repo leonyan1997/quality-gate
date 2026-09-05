@@ -54,11 +54,14 @@ pip install import-linter         # Python
 ### 增量检查（CI 核心命令）
 
 ```bash
-# 检查所有语言
+# 检查配置声明的语言（quality-gate.yaml languages；缺省 = rust/typescript/python）
 quality-gate check --diff
 
-# 只检查 Rust
+# 只检查 Rust（显式 --lang 覆盖配置）
 quality-gate check --diff --lang rust
+
+# 强制检查全部语言（覆盖 languages 配置）
+quality-gate check --diff --lang all
 
 # 指定检查类型（逗号分隔）
 quality-gate check --checks lint,duplication,dependency
@@ -69,6 +72,11 @@ QUALITY_GATE_BASE=origin/main quality-gate check --diff
 # 输出 JSON 报告
 quality-gate check --diff --output report.json
 ```
+
+语言选择语义：`check`/`scan` 只运行 `quality-gate.yaml languages` **声明**的
+语言——纯 Python 项目配 `languages: [python]` 后不再尝试 clippy/oxlint 等
+rust/ts 工具（也不会因缺工具误红）。显式 `--lang rust|ts|python` 覆盖配置；
+`--lang all` 强制全语言（兼容 monorepo 里逐子目录 cd 后单语言检查）。
 
 diff 基线说明：
 - 默认 `HEAD` —— 本地预提交语义：只检查工作区相对上次提交的未提交改动
@@ -173,7 +181,7 @@ cp quality-gate.yaml.example <你的项目>/quality-gate.yaml
 配置项说明：
 
 ```yaml
-languages: [rust, typescript, python]
+languages: [rust, typescript, python]  # 声明语言才跑；缺省 check/scan 只查这里声明的语言
 
 thresholds:
   crap: 30                     # 阶段三启用
@@ -221,6 +229,18 @@ checker 层按 `smell.ignore.paths` 显式豁免；实际生效集合 =
 伤连贯的单一算法）按**函数名**挂账，豁免其 long-method /
 long-parameter-list 上报；不在清单中的函数照报。注意按纯函数名匹配——
 多文件同名会全豁免，若有同名函数请改用拆分为上。
+
+## 门禁语义（可靠性契约）
+
+对 AI 把关场景，**"没真查却显示绿"比报错更危险**。quality-gate 遵循：
+
+- **核心检查项（lint / duplication / smell）——查不了就报错**：已声明语言的
+  工具缺失（ruff/clippy/oxlint+jscpd）→ error 级 issue + exit 1，绝不静默通过
+- **扩展检查项（coverage / dependency / 复杂度 CRAP）——查不了就明说**：
+  工具/项目配置缺失 → `⏭️ skipped` + 机器可读 reason（stdout 与 JSON 报告均
+  可见），exit 0；radon 缺失/超时/解析失败不再裸返回空结果
+- 依赖检查在无架构配置（deny.toml/.dependency-cruiser.js/.import-linter）时
+  skipped 属**项目配置选择**而非工具缺陷——按需在 CI 装齐工具后即会真查
 
 ## CI 集成
 
