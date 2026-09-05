@@ -83,6 +83,26 @@ diff 基线说明：
 - CI 场景设置 `QUALITY_GATE_BASE=origin/main` —— 检查 PR 相对主分支的全部改动
 - untracked 新文件始终按全文件视为新增（新增行=全文），不依赖基线
 
+### 自动修复（quality-gate fix）
+
+```bash
+# 自动修复 diff 内文件的 lint 问题（Python ruff --fix / TS oxlint→eslint --fix）
+quality-gate fix
+
+# 只修 Python；整仓修复（默认只动 diff 内文件）
+quality-gate fix --lang python
+quality-gate fix --all
+```
+
+fix 语义（P2，2026-09）：
+- **只处理 diff 内文件**（文件级增量；`--all` 才整仓，自动跳过
+  node_modules/.venv/target 等目录），不碰不可自动修项
+  （duplication/dependency/smell 等需人工判断）。
+- **Rust 仅建议**：不自动改文件，输出 `cargo clippy --fix` 建议由人工/AI 执行。
+- 修复完成后自动**复用 lint checker 复检**：仍有阻塞 lint → exit 1，否则 exit 0；
+  完整门禁（含 duplication/dependency/smell）请再跑 `quality-gate check --diff`。
+- 工具缺失（ruff/oxlint/eslint 都不可用）→ 显式报错 + exit 1，不静默。
+
 ### 全仓扫描（周报）
 
 ```bash
@@ -117,8 +137,8 @@ scan 与 check 的区别:
 | 重复代码 | ✅ jscpd | ✅ jscpd | ✅ jscpd | 语言无关，新增行过滤 |
 | 依赖检查 | ✅ cargo-deny | ✅ depcruise | ✅ import-linter | 全局阻塞，无配置自动跳过 |
 | 覆盖率 | ✅ tarpaulin | ✅ vitest | ✅ coverage.py | 新增文件 >0%（TS 基于 json-summary，Python 基于 coverage.json） |
-| 圈复杂度 | ✅ clippy | ✅ eslint | ⏸️ radon | 新增文件阻塞（Python CRAP 报告不阻塞） |
-| CRAP 报告 | ⏸️ | ⏸️ | ✅ radon | 当前仅报告（crap-index 已有） |
+| 圈复杂度 | ✅ clippy | ✅ eslint | ✅ radon | Rust/TS 新增文件阻塞；Python（P1）check --diff 只卡**新增 def** 且 cc≥阈值（默认 30、体 ≥5 行、function_ignore 豁免），触及非新增仅报告 |
+| CRAP 报告 | ⏸️ | ⏸️ | ✅ radon | scan 周报整仓仅报告（趋势存档）；check --diff 侧见上行增量阻塞 |
 | 结构坏味道 | ⏸️ | ⏸️ | ✅ AST 规则 | 8 条规则引擎；增量 P0/P1 阻塞、P2 仅报告 |
 
 ### 已实现：scan 全仓扫描与覆盖率扩展
@@ -167,8 +187,11 @@ dead-import 语义（对齐 pyflakes/ruff F401）：模块级 `__all__` 中声�
 
 - ✅ 函数级 allowlist（`function_ignore`，已接线）：长而聚焦的函数按名挂账，
   豁免 long-method / long-parameter-list 上报（详见下方配置说明）
+- ✅ CRAP 阻塞（Python 先行，P1 2026-09）：check --diff 只卡**新增 def** 且
+  cc ≥ 阈值（默认 30）的函数，函数体 ≥5 行、不在 `function_ignore` 才阻塞；
+  被 diff 触及的存量复杂函数仅报告不阻塞（增量债务语义）；scan 周报保持
+  整仓仅报告（趋势不漂移）
 - 函数级 diff（Python ast / Rust syn / TS Compiler API，弃 Tree-sitter）
-- CRAP 阻塞（阈值 30，新增函数 <5 行豁免）
 
 ## 配置文件
 
@@ -184,7 +207,7 @@ cp quality-gate.yaml.example <你的项目>/quality-gate.yaml
 languages: [rust, typescript, python]  # 声明语言才跑；缺省 check/scan 只查这里声明的语言
 
 thresholds:
-  crap: 30                     # 阶段三启用
+  crap: 30                     # CRAP/复杂度阈值（P1 已接线：Python 新增函数 cc≥该值阻塞）
   cyclomatic_complexity: 15    # 圈复杂度阈值
   duplication: 3               # 新增重复行百分比
 
@@ -227,8 +250,9 @@ checker 层按 `smell.ignore.paths` 显式豁免；实际生效集合 =
 
 函数级豁免 `function_ignore`（顶层，已接线）：长而聚焦的函数（机械拆分
 伤连贯的单一算法）按**函数名**挂账，豁免其 long-method /
-long-parameter-list 上报；不在清单中的函数照报。注意按纯函数名匹配——
-多文件同名会全豁免，若有同名函数请改用拆分为上。
+long-parameter-list 上报，**以及 Python CRAP 阻塞（P1）**；不在清单中的
+函数照报。注意按纯函数名匹配——多文件同名会全豁免，若有同名函数请改用
+拆分为上。
 
 ## 门禁语义（可靠性契约）
 
@@ -377,8 +401,8 @@ master 分支建议启用原生 Branch Protection，required status checks 勾�
 - [ ] --format markdown（增强，阶段一收尾后补）
 
 ### 阶段二：效率工具
-- [ ] quality-gate fix（Python ruff 自动修 / TS oxlint+eslint / Rust 仅建议）
-- [ ] --check 预览模式 + --language 参数 + ignore.paths 读取
+- [x] quality-gate fix（Python ruff 自动修 / TS oxlint→eslint / Rust 仅建议；P2 2026-09）
+- [ ] --check 预览模式（--language 参数与 ignore.paths 读取已实现，预览输出未做）
 
 ### 阶段三：测试质量（TS 试点）
 - [ ] 变异测试增量模式（tautest --since → 不过则 StrykerJS）
@@ -386,8 +410,9 @@ master 分支建议启用原生 Branch Protection，required status checks 勾�
 - [ ] 变异测试周报 workflow（artifact 存储）
 
 ### 阶段四：精细化（按需）
+- [x] CRAP 阻塞（Python 先行：新增 def 且 cc≥30、体 ≥5 行、function_ignore 豁免；P1 2026-09）
+- [x] 函数级 allowlist（`function_ignore`，C2 接线；亦豁免 CRAP 阻塞）
 - [ ] 函数级 diff（Python ast / Rust syn / TS Compiler API，弃 Tree-sitter）
-- [ ] CRAP 阻塞（阈值 30，新增函数 <5 行豁免）+ 函数级 allowlist
 
 ## 设计原则
 

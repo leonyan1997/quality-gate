@@ -11,7 +11,8 @@ languages:
 
 # 阈值配置
 thresholds:
-  # CRAP 指数阈值（阶段四启用）
+  # CRAP/圈复杂度阈值（P1 已接线，2026-09）：check --diff 对 Python 新增
+  # def 且 cc ≥ 该值的函数阻塞（函数体 ≥5 行、function_ignore 豁免除外）
   crap: 30
   # 圈复杂度阈值
   cyclomatic_complexity: 15
@@ -44,9 +45,9 @@ lint_ignore:
     - "**/build/**"
     - ".quality-gate/**"   # quality-gate 自身产物（scan 存档）
 
-# 函数级豁免（C2 已接线）：长而聚焦的函数按名挂账，豁免其
-# long-method / long-parameter-list 上报。纯函数名匹配——多文件同名会
-# 全豁免；确实需要豁免的函数名才写，别当摆设。
+# 函数级豁免（C2 已接线；P1 扩展到 CRAP 阻塞）：长而聚焦的函数按名挂账，
+# 豁免其 long-method / long-parameter-list 上报，以及 Python CRAP 阻塞。
+# 纯函数名匹配——多文件同名会全豁免；确实需要豁免的函数名才写，别当摆设。
 function_ignore:
   - "long_legacy_fn"
 
