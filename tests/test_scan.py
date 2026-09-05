@@ -88,56 +88,64 @@ def _smell_result(n_blocking: int, n_report: int = 0) -> dict:
     }
 
 
+def _stub_full_scan_checkers(monkeypatch, calls: dict) -> None:
+    """把 scanner 的 checker 全部换成记录调用的 stub（run_full_scan 编排测试用）
+
+    stub 形状按真实 checker 签名收窄为最少参数；return 用 *_result helper
+    构造固定结构，使 run_full_scan 的组装/透传可被断言而不真正扫描。
+    """
+    def fake_py_lint(repo_root, verbose=False, ignore_paths=None, full=False):
+        calls["python_lint_full"] = full
+        return _lint_result(0)
+
+    def fake_rust_lint(repo_root, verbose=False, ignore_paths=None, full=False):
+        calls["rust_lint_full"] = full
+        return _lint_result(0)
+
+    def fake_ts_lint(repo_root, verbose=False, ignore_paths=None, full=False):
+        calls["ts_lint_full"] = full
+        return _lint_result(0)
+
+    def fake_dup(repo_root, verbose=False, options=None, full=False):
+        calls["dup_full"] = full
+        return _dup_result(0)
+
+    def fake_dep(repo_root, lang, verbose=False):
+        calls["dep_lang"] = lang
+        return _dep_result()
+
+    def fake_crap(repo_root, verbose=False, ignore_paths=None,
+                  crap_threshold=30):
+        return _crap_result(0)
+
+    def fake_complexity(repo_root, verbose=False, ignore_paths=None,
+                        threshold=15):
+        return {"blocking": False, "issues": [], "report_only_issues": []}
+
+    def fake_smell(repo_root, verbose=False, ignore_paths=None, full=False,
+                   smell_config=None):
+        calls["smell_full"] = full
+        calls["smell_cfg"] = smell_config
+        return _smell_result(0)
+
+    monkeypatch.setattr(scanner, "check_python_lint_incremental", fake_py_lint)
+    monkeypatch.setattr(scanner, "check_rust_lint_incremental", fake_rust_lint)
+    monkeypatch.setattr(scanner, "check_ts_lint_incremental", fake_ts_lint)
+    monkeypatch.setattr(scanner, "check_duplication_incremental", fake_dup)
+    monkeypatch.setattr(scanner, "check_dependency_incremental", fake_dep)
+    monkeypatch.setattr(scanner, "check_python_crap_incremental", fake_crap)
+    monkeypatch.setattr(scanner, "check_rust_complexity_incremental",
+                        fake_complexity)
+    monkeypatch.setattr(scanner, "check_smell_incremental", fake_smell)
+
+
 class TestRunFullScan:
     """run_full_scan 编排：monkeypatch checker 返回值，验证组装与 full 透传"""
 
     def test_calls_checkers_with_full_true(self, tmp_path, monkeypatch):
         """lint/duplication 以 full=True 调用；dependency 无 full 参数"""
         calls: dict[str, bool | None] = {}
-
-        def fake_py_lint(repo_root, verbose=False, ignore_paths=None, full=False):
-            calls["python_lint_full"] = full
-            return _lint_result(0)
-
-        def fake_rust_lint(repo_root, verbose=False, ignore_paths=None, full=False):
-            calls["rust_lint_full"] = full
-            return _lint_result(0)
-
-        def fake_ts_lint(repo_root, verbose=False, ignore_paths=None, full=False):
-            calls["ts_lint_full"] = full
-            return _lint_result(0)
-
-        def fake_dup(repo_root, verbose=False, options=None, full=False):
-            calls["dup_full"] = full
-            return _dup_result(0)
-
-        def fake_dep(repo_root, lang, verbose=False):
-            calls["dep_lang"] = lang
-            return _dep_result()
-
-        def fake_crap(repo_root, verbose=False, ignore_paths=None,
-                      crap_threshold=30):
-            return _crap_result(0)
-
-        def fake_complexity(repo_root, verbose=False, ignore_paths=None,
-                            threshold=15):
-            return {"blocking": False, "issues": [], "report_only_issues": []}
-
-        def fake_smell(repo_root, verbose=False, ignore_paths=None, full=False,
-                       smell_config=None):
-            calls["smell_full"] = full
-            calls["smell_cfg"] = smell_config
-            return _smell_result(0)
-
-        monkeypatch.setattr(scanner, "check_python_lint_incremental", fake_py_lint)
-        monkeypatch.setattr(scanner, "check_rust_lint_incremental", fake_rust_lint)
-        monkeypatch.setattr(scanner, "check_ts_lint_incremental", fake_ts_lint)
-        monkeypatch.setattr(scanner, "check_duplication_incremental", fake_dup)
-        monkeypatch.setattr(scanner, "check_dependency_incremental", fake_dep)
-        monkeypatch.setattr(scanner, "check_python_crap_incremental", fake_crap)
-        monkeypatch.setattr(scanner, "check_rust_complexity_incremental",
-                            fake_complexity)
-        monkeypatch.setattr(scanner, "check_smell_incremental", fake_smell)
+        _stub_full_scan_checkers(monkeypatch, calls)
 
         results = scanner.run_full_scan(tmp_path)
 
