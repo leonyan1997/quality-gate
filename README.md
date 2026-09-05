@@ -420,6 +420,9 @@ dogfood 红线见 [docs/ai-使用守则.md](docs/ai-使用守则.md)。
 - [x] CRAP 阻塞（Python 先行：新增 def 且 cc≥30、体 ≥5 行、function_ignore 豁免；P1 2026-09）
 - [x] 函数级 allowlist（`function_ignore`，C2 接线；亦豁免 CRAP 阻塞）
 - [ ] 函数级 diff（Python ast / Rust syn / TS Compiler API，弃 Tree-sitter）
+- [ ] Rust/TS 结构坏味道 + CRAP：现成工具盘点结论（clippy/rustc/oxlint 可低成本接
+      long-method·long-parameter-list·dead-import·dead-code；CRAP 与类规则无现成需自研）
+      见 [docs/rust-ts-smell-spike-2026-09.md](docs/rust-ts-smell-spike-2026-09.md)——按需启用
 
 ## 设计原则
 
