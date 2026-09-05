@@ -20,8 +20,10 @@ quality-gate = "quality_gate.cli:main"
 #             必须容忍非零退出以读取 JSON 输出
 #   BLE001  - 外部工具 subprocess 容错：工具缺失/超时应降级报告而非崩溃
 #   S110    - git 命令探测失败时静默降级（返回空结果，由调用方处理）
+#   S112    - 单条坏味道规则对特殊代码形态抛异常时跳过该规则（与 BLE001 同族容错，
+#             不因个别规则崩溃拖垮整个门禁）
 #   FIX002  - 不强制 TODO 带 issue 号
-ignore = ["PLW1510", "BLE001", "S110", "FIX002"]
+ignore = ["PLW1510", "BLE001", "S110", "S112", "FIX002"]
 
 [tool.ruff.lint.per-file-ignores]
 # tests/smell/fixtures/*.py 是故意构造的坏味道样本（供各规则检测用），

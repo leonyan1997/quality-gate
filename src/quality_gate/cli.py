@@ -18,11 +18,12 @@ from .checkers.python_coverage import check_python_coverage_incremental
 from .checkers.python_lint import check_python_lint_incremental
 from .checkers.rust_coverage import check_rust_coverage_incremental
 from .checkers.rust_lint import check_rust_lint_incremental
+from .checkers.smell import check_smell_incremental
 from .checkers.ts_coverage import check_ts_coverage_incremental
 from .checkers.ts_lint import check_ts_lint_incremental
 from .config import QualityGateConfig
 
-CHECK_TYPES = ["lint", "coverage", "duplication", "complexity", "dependency"]
+CHECK_TYPES = ["lint", "coverage", "duplication", "complexity", "dependency", "smell"]
 
 
 def ensure_in_git_repo() -> None:
@@ -77,7 +78,7 @@ def main():
 @click.option(
     "--checks",
     default="all",
-    help="检查类型，逗号分隔: lint,coverage,duplication,complexity,dependency (默认 all)"
+    help="检查类型，逗号分隔: lint,coverage,duplication,complexity,dependency,smell (默认 all)"
 )
 @click.option(
     "--output",
@@ -113,6 +114,7 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
     want_dup = "duplication" in checks_list
     want_complexity = "complexity" in checks_list
     want_dependency = "dependency" in checks_list
+    want_smell = "smell" in checks_list
 
     # 加载配置
     config = QualityGateConfig()
@@ -221,6 +223,12 @@ def check(diff: bool, lang: str, checks: str, output: str | None, verbose: bool)
                 repo_root, lang="python", verbose=verbose,
             )
             if python_result["dependency"]["blocking"]:
+                exit_code = 1
+        if want_smell:
+            python_result["smell"] = check_smell_incremental(
+                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
+            )
+            if python_result["smell"]["blocking"]:
                 exit_code = 1
         results["python"] = python_result
 
