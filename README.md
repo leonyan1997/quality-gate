@@ -144,6 +144,11 @@ switch-statements / data-class / lazy-class），三条命令的行为差异：
 严重度映射：P0 = long-method；P1 = large-class / long-parameter-list /
 dead-import；P2 = lazy-class / dead-code / data-class / switch-statements。
 
+dead-import 语义（对齐 pyflakes/ruff F401）：模块级 `__all__` 中声明的名字，
+以及 `import x as x` / `from y import x as x`（PEP 484 显式 re-export 标记），
+视为公共 API 导出，不算未使用 import；不在 `__all__` 保护内的未使用 import
+照报。re-export 模式（如包门面的 `__init__.py`）不再误报。
+
 ### 阶段三（测试质量 · 规划中）
 
 - 变异测试（TS 试点：tautest 增量 → 不过则回退 StrykerJS）
