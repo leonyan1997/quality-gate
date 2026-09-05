@@ -1,7 +1,7 @@
 """Smell 增量检查器——结构坏味道接入 check --diff 门禁
 
-规则引擎本体在 quality_gate/smell/（8 条 Python AST 规则，自 hermes-smell
-迁入）。本模块只做 diff 语义适配，锚点分类（见增量门禁设计）：
+规则引擎本体在 quality_gate/smell/（8 条 Python AST 规则，整合自独立
+引擎）。本模块只做 diff 语义适配，锚点分类（见增量门禁设计）：
 
   - 行级规则（long-parameter-list / dead-import）
       → finding.line 命中 diff 新增/修改行才报
