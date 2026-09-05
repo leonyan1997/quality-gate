@@ -33,15 +33,16 @@ from .checkers.dependency import check_dependency_incremental
 from .checkers.duplication import check_duplication_incremental
 from .checkers.python_lint import check_python_lint_incremental
 from .checkers.rust_lint import check_rust_lint_incremental
+from .checkers.smell import check_smell_incremental
 from .checkers.ts_lint import check_ts_lint_incremental
 from .config import QualityGateConfig
 
 # 存档目录: <repo>/.quality-gate/history/scan-<timestamp>.json
 HISTORY_SUBDIR = ".quality-gate/history"
 
-# scan 周报默认检查: lint + duplication + dependency + complexity(CRAP)
+# scan 周报默认检查: lint + duplication + dependency + complexity(CRAP) + smell
 # 不含 coverage —— 覆盖率需要跑测试(重)，check 增量语义已覆盖
-DEFAULT_SCAN_CHECKS = ["lint", "duplication", "dependency", "complexity"]
+DEFAULT_SCAN_CHECKS = ["lint", "duplication", "dependency", "complexity", "smell"]
 
 
 def _now_iso() -> str:
@@ -144,6 +145,11 @@ def run_full_scan(
             python_result["dependency"] = check_dependency_incremental(
                 repo_root, lang="python", verbose=verbose,
             )
+        if "smell" in DEFAULT_SCAN_CHECKS:
+            python_result["smell"] = check_smell_incremental(
+                repo_root, verbose=verbose, ignore_paths=lint_ignore_paths,
+                full=True,
+            )
         results["python"] = python_result
 
     # 重复代码（语言无关，跑一次）
@@ -196,7 +202,7 @@ def load_report(path: Path) -> dict[str, Any] | None:
 def compare_reports(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     """对比两份 scan 报告，产出周报趋势摘要
 
-    对比维度（lint / 重复块 / CRAP 超阈值函数）:
+    对比维度（lint / 重复块 / CRAP 超阈值函数 / smell 结构坏味道）:
         lint: {lang: {check: {before, after, delta}}}
         duplication: {before, after, delta}
     """
@@ -252,7 +258,24 @@ def compare_reports(baseline: dict[str, Any], current: dict[str, Any]) -> dict[s
         "persistent": sorted(c_fn & b_fn),
     }
 
+    # smell（python 结构坏味道：P0/P1 阻塞 issues + P2 报告项）
+    b_smell = (baseline.get("results", {}).get("python", {}) or {}).get("smell", {})
+    c_smell = (current.get("results", {}).get("python", {}) or {}).get("smell", {})
+    trend["smell"] = {
+        "before": _smell_count(b_smell),
+        "after": _smell_count(c_smell),
+        "delta": _smell_count(c_smell) - _smell_count(b_smell),
+    }
+
     return trend
+
+
+def _smell_count(smell_result: Any) -> int:
+    """smell checker 计数：issues(P0/P1) + report_only_issues(P2)"""
+    if not isinstance(smell_result, dict):
+        return 0
+    return len(smell_result.get("issues", [])) + len(
+        smell_result.get("report_only_issues", []))
 
 
 def print_trend(trend: dict[str, Any]) -> None:
@@ -277,6 +300,13 @@ def print_trend(trend: dict[str, Any]) -> None:
     sys.stdout.write(
         f"  {arrow} CRAP 超阈值函数: {crap.get('before', 0)} → "
         f"{crap.get('after', 0)} ({c:+d})\n"
+    )
+    smell = trend.get("smell") or {}
+    s = smell.get("delta", 0)
+    arrow = "🟢" if s < 0 else ("🔴" if s > 0 else "⚪")
+    sys.stdout.write(
+        f"  {arrow} 结构坏味道(smell): {smell.get('before', 0)} → "
+        f"{smell.get('after', 0)} ({s:+d})\n"
     )
     # 函数级明细（有则展示新增/消失的具体函数）
     details = trend.get("crap_function_details") or {}

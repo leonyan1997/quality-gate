@@ -68,6 +68,25 @@ def _crap_result(n: int, prefix: str = "f") -> dict:
     }
 
 
+def _smell_result(n_blocking: int, n_report: int = 0) -> dict:
+    """构造 smell checker 返回结构（n_blocking 个 P0/P1 + n_report 个 P2）"""
+    return {
+        "blocking": bool(n_blocking),
+        "issues": [
+            {"file": "s.py", "line": i, "code": "long-method",
+             "message": f"smell {i}", "severity": "P0"}
+            for i in range(n_blocking)
+        ],
+        "report_only_issues": [
+            {"file": "s.py", "line": i, "code": "data-class",
+             "message": f"smell {i}", "severity": "P2"}
+            for i in range(n_report)
+        ],
+        "files_scanned": 1,
+        "tool": "smell-rules",
+    }
+
+
 class TestRunFullScan:
     """run_full_scan 编排：monkeypatch checker 返回值，验证组装与 full 透传"""
 
@@ -104,6 +123,10 @@ class TestRunFullScan:
                             threshold=15):
             return {"blocking": False, "issues": [], "report_only_issues": []}
 
+        def fake_smell(repo_root, verbose=False, ignore_paths=None, full=False):
+            calls["smell_full"] = full
+            return _smell_result(0)
+
         monkeypatch.setattr(scanner, "check_python_lint_incremental", fake_py_lint)
         monkeypatch.setattr(scanner, "check_rust_lint_incremental", fake_rust_lint)
         monkeypatch.setattr(scanner, "check_ts_lint_incremental", fake_ts_lint)
@@ -112,6 +135,7 @@ class TestRunFullScan:
         monkeypatch.setattr(scanner, "check_python_crap_incremental", fake_crap)
         monkeypatch.setattr(scanner, "check_rust_complexity_incremental",
                             fake_complexity)
+        monkeypatch.setattr(scanner, "check_smell_incremental", fake_smell)
 
         results = scanner.run_full_scan(tmp_path)
 
@@ -120,6 +144,9 @@ class TestRunFullScan:
         assert calls["rust_lint_full"] is True
         assert calls["ts_lint_full"] is True
         assert calls["dup_full"] is True
+        # smell 挂 python 分支，full=True（无需 git diff，全量评估）
+        assert calls["smell_full"] is True
+        assert "smell" in results["python"]
         # dependency 按语言分发
         assert calls["dep_lang"] in ("rust", "ts", "python")
         # 结构: rust/ts/python 各含 lint(+dependency/complexity), duplication 顶层
@@ -149,17 +176,23 @@ class TestRunFullScan:
         def fake_crap(*a, **kw):
             return _crap_result(0)
 
+        def fake_smell(*a, **kw):
+            return _smell_result(0)
+
         monkeypatch.setattr(scanner, "check_python_lint_incremental", fake_py_lint)
         monkeypatch.setattr(scanner, "check_rust_lint_incremental", fake_rust_lint)
         monkeypatch.setattr(scanner, "check_ts_lint_incremental", fake_ts_lint)
         monkeypatch.setattr(scanner, "check_dependency_incremental", fake_dep)
         monkeypatch.setattr(scanner, "check_python_crap_incremental", fake_crap)
+        monkeypatch.setattr(scanner, "check_smell_incremental", fake_smell)
 
         results = scanner.run_full_scan(tmp_path, lang="python")
         assert called == ["python"]
         assert "rust" not in results
         assert "ts" not in results
         assert "python" in results
+        # smell 只挂 python 分支
+        assert "smell" in results["python"]
 
 
 class TestArchive:
@@ -269,6 +302,38 @@ class TestCompareReports:
         trend = scanner.compare_reports(base, cur)
         assert trend["lint"]["rust"] == {"before": 0, "after": 2, "delta": 2}
 
+    def test_trend_detects_smell_change(self, tmp_path):
+        """smell 维度：P0/P1 issues 与 P2 报告项都计入趋势"""
+        base = self._report({
+            "rust": {"lint": _lint_result(0)},
+            "ts": {"lint": _lint_result(0)},
+            "python": {"lint": _lint_result(0), "complexity": _crap_result(0),
+                       "smell": _smell_result(1, 2)},
+            "duplication": _dup_result(0),
+        })
+        cur = self._report({
+            "rust": {"lint": _lint_result(0)},
+            "ts": {"lint": _lint_result(0)},
+            "python": {"lint": _lint_result(0), "complexity": _crap_result(0),
+                       "smell": _smell_result(2, 3)},
+            "duplication": _dup_result(0),
+        })
+        trend = scanner.compare_reports(base, cur)
+        # 3(=1+2) → 5(=2+3)
+        assert trend["smell"] == {"before": 3, "after": 5, "delta": 2}
+
+    def test_smell_missing_in_baseline_counts_zero(self, tmp_path):
+        """旧存档无 smell 维度 → before=0，不崩溃（向后兼容）"""
+        base = self._report({
+            "python": {"lint": _lint_result(0), "complexity": _crap_result(0)},
+        })
+        cur = self._report({
+            "python": {"lint": _lint_result(0), "complexity": _crap_result(0),
+                       "smell": _smell_result(1, 1)},
+        })
+        trend = scanner.compare_reports(base, cur)
+        assert trend["smell"] == {"before": 0, "after": 2, "delta": 2}
+
 
 class TestScanSummary:
     """cli._scan_summary 汇总提取"""
@@ -279,7 +344,8 @@ class TestScanSummary:
             "ts": {"lint": _lint_result(0), "dependency": _dep_result(0)},
             "python": {"lint": _lint_result(2),
                        "dependency": _dep_result(0),
-                       "complexity": _crap_result(4)},
+                       "complexity": _crap_result(4),
+                       "smell": _smell_result(1, 2)},
             "duplication": _dup_result(5),
         }
         s = _scan_summary(results)
@@ -287,9 +353,12 @@ class TestScanSummary:
         assert s["duplication_blocks"] == 5
         assert s["dependency_issues"] == 1
         assert s["crap_functions"] == 4
+        # smell = P0/P1 issues(1) + P2 报告项(2)
+        assert s["smell_issues"] == 3
 
     def test_summary_skips_missing_keys(self):
         assert _scan_summary({}) == {
             "lint_issues": 0, "duplication_blocks": 0,
             "dependency_issues": 0, "crap_functions": 0,
+            "smell_issues": 0,
         }

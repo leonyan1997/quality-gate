@@ -350,7 +350,7 @@ def scan(lang: str, output: str | None, no_archive: bool, verbose: bool):
     """全仓扫描（周报）
 
     与 check 增量门禁不同，scan 是全仓快照:
-      - 不做 git diff 过滤，报告全部存量问题（lint/重复/依赖/CRAP）
+      - 不做 git diff 过滤，报告全部存量问题（lint/重复/依赖/CRAP/smell）
       - 不阻塞：无论发现多少问题 exit code 都是 0（工具级错误除外）
       - 每次结果存档到 .quality-gate/history/scan-<ts>.json，
         与上次扫描对比输出周报趋势
@@ -393,7 +393,8 @@ def scan(lang: str, output: str | None, no_archive: bool, verbose: bool):
         click.echo(f"   摘要: lint 问题 {summary['lint_issues']} 个 / "
                    f"重复块 {summary['duplication_blocks']} 处 / "
                    f"依赖违规 {summary['dependency_issues']} 个 / "
-                   f"CRAP 超阈值 {summary['crap_functions']} 个")
+                   f"CRAP 超阈值 {summary['crap_functions']} 个 / "
+                   f"结构坏味道 {summary['smell_issues']} 个")
     else:
         click.echo("\n" + "=" * 60)
         click.echo("全仓扫描结果（存量问题总量，不阻塞）:")
@@ -430,6 +431,7 @@ def _scan_summary(results: dict) -> dict:
     lint_issues = 0
     dependency_issues = 0
     crap_functions = 0
+    smell_issues = 0
     for lang in ("rust", "ts", "python"):
         lang_res = results.get(lang) or {}
         if not isinstance(lang_res, dict):
@@ -444,6 +446,11 @@ def _scan_summary(results: dict) -> dict:
             complexity = lang_res.get("complexity") or {}
             if isinstance(complexity, dict):
                 crap_functions += len(complexity.get("issues", []))
+            smell = lang_res.get("smell") or {}
+            if isinstance(smell, dict):
+                # 存量坏味道 = P0/P1 阻塞 issues + P2 报告项
+                smell_issues += len(smell.get("issues", []))
+                smell_issues += len(smell.get("report_only_issues", []))
     dup = results.get("duplication") or {}
     dup_blocks = len(dup.get("issues", [])) if isinstance(dup, dict) else 0
     return {
@@ -451,6 +458,7 @@ def _scan_summary(results: dict) -> dict:
         "duplication_blocks": dup_blocks,
         "dependency_issues": dependency_issues,
         "crap_functions": crap_functions,
+        "smell_issues": smell_issues,
     }
 
 
