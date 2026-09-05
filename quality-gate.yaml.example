@@ -41,10 +41,11 @@ lint_ignore:
     - "**/build/**"
     - ".quality-gate/**"   # quality-gate 自身产物（scan 存档）
 
-# 函数级忽略（阶段四启用）
+# 函数级豁免（C2 已接线）：长而聚焦的函数按名挂账，豁免其
+# long-method / long-parameter-list 上报。纯函数名匹配——多文件同名会
+# 全豁免；确实需要豁免的函数名才写，别当摆设。
 function_ignore:
-  - "legacy_compatibility"
-  - "deprecated_helper"
+  - "long_legacy_fn"
 
 # 结构坏味道（smell，Python AST 规则引擎）
 # 键名 = SmellConfig 字段；省略的项用引擎内置默认（60 行/10 方法/300 行/5 参数/3 分支/2 方法）

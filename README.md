@@ -155,11 +155,12 @@ dead-import 语义（对齐 pyflakes/ruff F401）：模块级 `__all__` 中声�
 - `--mutation-report` 集成到 check --diff（默认关、非阻塞、3 分钟超时跳过）
 - 变异测试周报（schedule workflow + artifact）
 
-### 阶段四（精细化 · 规划中）
+### 阶段四（精细化 · 部分启用）
 
+- ✅ 函数级 allowlist（`function_ignore`，已接线）：长而聚焦的函数按名挂账，
+  豁免 long-method / long-parameter-list 上报（详见下方配置说明）
 - 函数级 diff（Python ast / Rust syn / TS Compiler API，弃 Tree-sitter）
 - CRAP 阻塞（阈值 30，新增函数 <5 行豁免）
-- 函数级 allowlist（function_ignore）
 
 ## 配置文件
 
@@ -189,6 +190,10 @@ lint_ignore:
     - "**/node_modules/**"
     - "**/target/**"
 
+function_ignore:
+  - "long_legacy_fn"            # 函数级豁免（C2 已接线）：长而聚焦函数按名挂账，
+                                # 豁免 long-method / long-parameter-list 上报
+
 smell:
   max_function_lines: 60      # 函数体超过 → long-method（P0 阻塞）
   max_class_methods: 10       # 类方法数超过 → large-class（P1 阻塞）
@@ -211,6 +216,11 @@ smell 豁免路径（`smell.ignore.paths`）与 `lint_ignore.paths` 语义解耦
 豁免不该管 smell，故意样本/测试桩（按设计要触发规则的 fixtures）在
 checker 层按 `smell.ignore.paths` 显式豁免；实际生效集合 =
 `lint_ignore.paths` ∪ `smell.ignore.paths`（并集，向后兼容）。
+
+函数级豁免 `function_ignore`（顶层，已接线）：长而聚焦的函数（机械拆分
+伤连贯的单一算法）按**函数名**挂账，豁免其 long-method /
+long-parameter-list 上报；不在清单中的函数照报。注意按纯函数名匹配——
+多文件同名会全豁免，若有同名函数请改用拆分为上。
 
 ## CI 集成
 
