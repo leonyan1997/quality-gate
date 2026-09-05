@@ -10,3 +10,10 @@ smell:
   ignore:
     paths:
       - "tests/smell/fixtures/*.py"
+
+# 函数级豁免挂账（C2，2026-09-05 自身债务清理，D1=b 决策）
+# 长而聚焦（单一算法、机械拆分伤连贯）的函数按名字挂账，scan 不报
+# long-method/long-parameter-list；多文件同名会全豁免（本仓库函数名唯一，
+# 盲点留补阙审）。例外的"杂"函数走 C1 拆分而非挂账。
+function_ignore:
+  - "check_smell_incremental"   # 86 行单一增量算法（P4 已裁决豁免，本轮机制化）

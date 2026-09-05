@@ -95,10 +95,9 @@ class QualityGateConfig:
                 ".quality-gate/**",
             ]
         },
-        "function_ignore": [
-            "legacy_compatibility",
-            "deprecated_helper",
-        ],
+        # 函数级豁免（C2 接线，2026-09-05）：默认空——由用户按需挂账
+        # 长而聚焦函数（long-method / long-parameter-list 豁免）
+        "function_ignore": [],
         # smell 引擎（Python 结构坏味道）阈值——键名与 SmellConfig 字段对齐，
         # 默认值以 smell/types.py SmellConfig dataclass 为单一事实源，此处
         # 仅为 example/合并提供完整形态
@@ -208,6 +207,10 @@ def build_smell_config(config: QualityGateConfig) -> SmellConfig:
         if key in ("enabled_rules", "disabled_rules"):
             value = value or None
         kwargs[key] = value
+    # 顶层 function_ignore（C2 接线）注入 SmellConfig——函数级豁免是配置
+    # 级开关，不藏在 smell 段里（沿用 example 顶层位置，向后兼容既有用户）
+    if config.function_ignore:
+        kwargs["function_ignore"] = list(config.function_ignore)
     return SmellConfig(**kwargs)
 
 

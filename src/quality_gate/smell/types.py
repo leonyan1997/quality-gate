@@ -43,3 +43,4 @@ class SmellConfig:
     min_severity: str = "P2"                     # P0 | P1 | P2
     exclude_dirs: list[str] | None = None        # 额外排除的目录名
     baseline_file: str | None = None             # --baseline 路径
+    function_ignore: list[str] | None = None     # 函数级豁免（C2，quality-gate.yaml function_ignore）

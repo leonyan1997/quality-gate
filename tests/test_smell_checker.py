@@ -278,3 +278,47 @@ class TestConfiguredThresholds:
 
         assert res["blocking"] is False
         assert all(i["code"] != "long-method" for i in res["issues"])
+
+
+class TestFunctionIgnore:
+    """function_ignore：函数级豁免（C2 接线）"""
+
+    def _cfg(self, functions: list[str]):
+        from quality_gate.smell.types import SmellConfig
+        return SmellConfig(function_ignore=functions)
+
+    def test_ignored_function_long_method_not_reported(self, tmp_path):
+        """豁免清单命中的函数 → long-method 不上报（长而聚焦挂账）"""
+        repo = _init_repo(tmp_path, {"ok.py": "x = 1\n"})
+        (repo / "new.py").write_text(
+            _long_func(64)  # 命名 legacy_fn，进 function_ignore
+            .replace("def f():", "def legacy_fn():"),
+            encoding="utf-8",
+        )
+
+        res = check_smell_incremental(
+            repo, smell_config=self._cfg(["legacy_fn"]),
+        )
+
+        assert res["blocking"] is False
+        assert res["issues"] == []
+
+    def test_unignored_functions_still_reported(self, tmp_path):
+        """豁免清单只保护命中的函数；同文件其它长函数照报"""
+        repo = _init_repo(tmp_path, {"ok.py": "x = 1\n"})
+        (repo / "new.py").write_text(
+            _long_func(64).replace("def f():", "def legacy_fn():")
+            + "\n"
+            + _long_func(64).replace("def f():", "def real_debt():")
+            + "\n",
+            encoding="utf-8",
+        )
+
+        res = check_smell_incremental(
+            repo, smell_config=self._cfg(["legacy_fn"]),
+        )
+
+        assert res["blocking"] is True
+        long_methods = [i for i in res["issues"] if i["code"] == "long-method"]
+        assert len(long_methods) == 1
+        assert "real_debt" in long_methods[0]["message"]

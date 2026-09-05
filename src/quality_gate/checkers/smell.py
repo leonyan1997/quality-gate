@@ -57,7 +57,8 @@ def check_smell_incremental(
     full=True: 全仓扫描（scan 周报用），全部存量坏味道都进 issues/report。
 
     smell_config: 由 quality-gate.yaml 的 smell 段构建的阈值配置
-    （build_smell_config()）；缺省用 SmellConfig 默认。
+    （build_smell_config()，含 function_ignore 顶层清单注入）；
+    缺省用 SmellConfig 默认。
     """
     if ignore_paths is None:
         ignore_paths = []
@@ -138,11 +139,21 @@ def _run_rules(
     tree: ast.AST,
     config: SmellConfig,
 ) -> list[Finding]:
-    """对单个文件运行全部启用规则；单条规则异常不拖垮门禁"""
+    """对单个文件运行全部启用规则；单条规则异常不拖垮门禁
+
+    函数级豁免（config.function_ignore，C2）在逐 finding 处应用：
+    命中函数名跳过（函数级规则 long-method / long-parameter-list 的
+    finding.detail 含 "function" 键；类级/文件级 finding 无此键不受影响）。
+    """
+    ignored_functions = set(config.function_ignore or [])
     findings: list[Finding] = []
     for rule in get_enabled_rules(config):
         try:
-            findings.extend(rule.check(file_path, source, tree, config))
+            for finding in rule.check(file_path, source, tree, config):
+                fn = finding.detail.get("function")
+                if fn in ignored_functions:
+                    continue
+                findings.append(finding)
         except Exception:
             # 单条规则对特殊代码形态的防御：跳过该规则而非误报/拖垮门禁
             pass
