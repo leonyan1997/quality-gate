@@ -1,0 +1,18 @@
+{
+ "message": "Empty fallbacks in spreads are unnecessary",
+ "code": "unicorn(no-useless-fallback-in-spread)",
+ "severity": "warning",
+ "url": "https://oxc.rs/docs/guide/usage/linter/rules/unicorn/no-useless-fallback-in-spread.html",
+ "help": "Spreading falsy values in object literals won't add any unexpected properties, so it's unnecessary to add an empty object as fallback.",
+ "filename": "src/components/EChart.vue",
+ "labels": [
+  {
+   "span": {
+    "offset": 1815,
+    "length": 22,
+    "line": 36,
+    "column": 34
+   }
+  }
+ ]
+}

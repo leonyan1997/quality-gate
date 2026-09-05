@@ -1,0 +1,35 @@
+{
+ "cell": null,
+ "code": "I001",
+ "end_location": {
+  "column": 57,
+  "row": 15
+ },
+ "filename": "/home/leonyan/projects/novel-indexing/indexer/__main__.py",
+ "fix": {
+  "applicability": "safe",
+  "edits": [
+   {
+    "content": "import argparse\nimport sys\nfrom typing import Any\n\nfrom indexer.config import DB_PATH, NOVEL_VAULT, NovelConfig\nfrom indexer.pipeline.extract import run_extraction\nfrom indexer.pipeline.incremental import run_incremental\nfrom indexer.store import (\n    audit_character_aliases,\n    generate_verification_report,\n    init_database,\n    merge_characters,\n)\n\n\n",
+    "end_location": {
+     "column": 1,
+     "row": 18
+    },
+    "location": {
+     "column": 1,
+     "row": 3
+    }
+   }
+  ],
+  "message": "Organize imports"
+ },
+ "location": {
+  "column": 1,
+  "row": 3
+ },
+ "message": "Import block is un-sorted or un-formatted",
+ "name": "unsorted-imports",
+ "noqa_row": 3,
+ "severity": "error",
+ "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+}
