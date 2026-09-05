@@ -382,6 +382,13 @@ master 分支建议启用原生 Branch Protection，required status checks 勾�
 ❌ 质量门禁失败 - 请修复上述问题
 ```
 
+## 状态与 AI 协作守则
+
+quality-gate **核心已闭环**（check 增量门禁 / fix 自动修复 / scan 周报，
+rust·ts·python 三语言），处于**维护模式**：路线图剩余项为 backlog，按需启用、
+不主动排期。AI 协作会话写码时必须默认使用 quality-gate——固定收尾三步与
+dogfood 红线见 [docs/ai-使用守则.md](docs/ai-使用守则.md)。
+
 ## 开发路线图
 
 ### 已落地（v2.0 + scan）
