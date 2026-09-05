@@ -35,7 +35,7 @@ from .checkers.python_lint import check_python_lint_incremental
 from .checkers.rust_lint import check_rust_lint_incremental
 from .checkers.smell import check_smell_incremental
 from .checkers.ts_lint import check_ts_lint_incremental
-from .config import QualityGateConfig, build_smell_config
+from .config import QualityGateConfig, build_smell_config, smell_effective_ignore_paths
 
 # 存档目录: <repo>/.quality-gate/history/scan-<timestamp>.json
 HISTORY_SUBDIR = ".quality-gate/history"
@@ -164,7 +164,9 @@ def _scan_python(
         )
     if "smell" in DEFAULT_SCAN_CHECKS:
         result["smell"] = check_smell_incremental(
-            repo_root, verbose=verbose, ignore_paths=config.lint_ignore_paths,
+            repo_root, verbose=verbose,
+            # smell 生效豁免 = lint ∪ smell.ignore（B1 语义解耦）
+            ignore_paths=smell_effective_ignore_paths(config),
             full=True, smell_config=build_smell_config(config),
         )
     return result

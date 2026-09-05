@@ -198,11 +198,19 @@ smell:
   min_lazy_class_methods: 2   # 方法数 ≤ → lazy-class（P2 报告）
   enabled_rules: []           # 只启用指定规则（空 = 全部启用）
   disabled_rules: []          # 排除指定规则（空 = 不排除）
+  ignore:
+    paths:
+      - "tests/smell/fixtures/**"   # smell 专属豁免（故意样本/测试桩）
 ```
 
 smell 段可省略——未配置时全部阈值用引擎内置默认（上例数值即默认值）。
 各命令下的 smell 行为差异见「已实现：结构坏味道引擎（smell）」一节；
 完整规则与阈值定义见 `src/quality_gate/smell/`。
+
+smell 豁免路径（`smell.ignore.paths`）与 `lint_ignore.paths` 语义解耦：lint
+豁免不该管 smell，故意样本/测试桩（按设计要触发规则的 fixtures）在
+checker 层按 `smell.ignore.paths` 显式豁免；实际生效集合 =
+`lint_ignore.paths` ∪ `smell.ignore.paths`（并集，向后兼容）。
 
 ## CI 集成
 

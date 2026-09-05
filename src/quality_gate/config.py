@@ -111,6 +111,12 @@ class QualityGateConfig:
             "min_lazy_class_methods": 2,
             "enabled_rules": [],
             "disabled_rules": [],
+            # smell 专属豁免（B1）：fixtures/故意样本/测试桩显式豁免通道。
+            # 不是 SmellConfig 字段，不参与 build_smell_config 翻译——
+            # 经模块级 smell_effective_ignore_paths() 读取（并集 lint）
+            "ignore": {
+                "paths": [],
+            },
         },
     }
 
@@ -203,3 +209,19 @@ def build_smell_config(config: QualityGateConfig) -> SmellConfig:
             value = value or None
         kwargs[key] = value
     return SmellConfig(**kwargs)
+
+
+def smell_effective_ignore_paths(config: QualityGateConfig) -> list[str]:
+    """smell 检查生效的豁免集合 = lint_ignore.paths ∪ smell.ignore.paths
+
+    B1（2026-09-05 自身债务清理）：smell 不再复用 lint_ignore（语义污染
+    ——lint 豁免不该管 smell）；fixtures/故意样本/测试桩经 quality-gate.yaml
+    smell.ignore.paths 显式豁免。生效集合取并集向后兼容（既有靠 lint_ignore
+    豁免 smell 的项目行为不变），保序去重。
+
+    模块级函数而非 QualityGateConfig 方法：P4.1 裁决过该类刻意保持在
+    10 方法阈值下（large-class 规则），新增访问器会让自身 scan 再报大类。
+    """
+    merged = list(config.lint_ignore_paths)
+    merged += config.config.get("smell", {}).get("ignore", {}).get("paths", [])
+    return list(dict.fromkeys(merged))

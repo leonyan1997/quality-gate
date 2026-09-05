@@ -5,7 +5,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from quality_gate.config import QualityGateConfig, build_smell_config
+from quality_gate.config import (
+    QualityGateConfig,
+    build_smell_config,
+    smell_effective_ignore_paths,
+)
 
 
 class TestConfigDefaults:
@@ -161,3 +165,49 @@ class TestSmellConfig:
         assert smell_cfg.disabled_rules is None
         # 既有嵌套段（thresholds）同样不受前例污染
         assert second.get_threshold("duplication") == 3.0
+
+
+class TestSmellIgnorePaths:
+    """smell.ignore.paths：独立豁免通道（B1 语义解耦）"""
+
+    def test_default_smell_ignore_empty(self, tmp_path, monkeypatch):
+        # 隔离仓库根 dogfood 配置：切到无 quality-gate.yaml 的临时目录
+        monkeypatch.chdir(tmp_path)
+        cfg = QualityGateConfig()
+        # 生效集合 = lint ∪ smell = lint（保序去重）
+        assert smell_effective_ignore_paths(cfg) == cfg.lint_ignore_paths
+
+    def test_yaml_smell_ignore_loaded(self, tmp_path):
+        config_file = tmp_path / "quality-gate.yaml"
+        config_file.write_text(
+            "lint_ignore:\n"
+            "  paths:\n"
+            "    - '**/node_modules/**'\n"
+            "smell:\n"
+            "  ignore:\n"
+            "    paths:\n"
+            "      - 'tests/smell/fixtures/**'\n",
+            encoding="utf-8",
+        )
+        cfg = QualityGateConfig(config_path=config_file)
+        effective = smell_effective_ignore_paths(cfg)
+        # smell 专属豁免并入生效集合（lint 豁免保持既有覆盖语义不变）
+        assert "tests/smell/fixtures/**" in effective
+        assert "**/node_modules/**" in effective
+        assert len(effective) == len(set(effective))  # 保序去重
+
+    def test_smell_ignore_not_merged_into_rule_config(self, tmp_path):
+        """ignore 是 config 层通道，不泄漏进 SmellConfig（未知键被跳过）"""
+        config_file = tmp_path / "quality-gate.yaml"
+        config_file.write_text(
+            "smell:\n"
+            "  ignore:\n"
+            "    paths:\n"
+            "      - 'tests/smell/fixtures/**'\n"
+            "  max_function_lines: 50\n",
+            encoding="utf-8",
+        )
+        cfg = QualityGateConfig(config_path=config_file)
+        smell_cfg = build_smell_config(cfg)
+        assert smell_cfg.max_function_lines == 50  # 常规键仍生效
+        assert not hasattr(smell_cfg, "ignore")  # ignore 不进 SmellConfig

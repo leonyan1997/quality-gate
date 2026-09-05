@@ -64,3 +64,10 @@ smell:
   enabled_rules: []
   # 排除指定规则（不写 = 不排除）；例: ["data-class"]
   disabled_rules: []
+  # smell 专属豁免路径（B1，2026-09-05 语义解耦）——与 lint_ignore 互不污染：
+  #   lint 豁免不该管 smell；故意样本/测试桩（按设计要触发规则的 fixtures）
+  #   用本通道显式豁免，checker 层按路径跳过
+  # 生效集合 = lint_ignore.paths ∪ smell.ignore.paths（并集，向后兼容）
+  ignore:
+    paths:
+      - "tests/smell/fixtures/**"

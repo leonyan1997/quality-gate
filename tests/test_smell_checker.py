@@ -180,6 +180,29 @@ class TestFullModeAndCli:
         assert any(i["code"] == "long-method" for i in res["issues"])
         assert res["files_scanned"] == 1
 
+    def test_full_mode_respects_smell_ignore_paths(self, tmp_path):
+        """full 扫描 smell 豁免生效：故意样本目录被 ignore_paths 排除（B1）
+
+        规则层单测不受影响——fixtures 豁免在 checker 层按路径过滤，
+        规则类单测仍直接调 rule.check 验证检测能力。
+        """
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        (plain / "app.py").write_text("x = 1\n", encoding="utf-8")
+        fx = plain / "tests" / "smell" / "fixtures"
+        fx.mkdir(parents=True)
+        (fx / "smelly.py").write_text(
+            "import os\n\n" + _long_func(64) + "\n", encoding="utf-8",
+        )
+
+        res = check_smell_incremental(
+            plain, full=True, ignore_paths=["tests/smell/fixtures/*.py"],
+        )
+
+        assert res["blocking"] is False
+        assert res["issues"] == []
+        assert res["files_scanned"] == 1  # 只有 app.py 进扫描
+
     def test_cli_accepts_smell_check(self, tmp_path, monkeypatch):
         """check --checks smell --lang python 合法且干净仓库通过"""
         monkeypatch.chdir(tmp_path)

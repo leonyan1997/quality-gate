@@ -1,0 +1,12 @@
+# quality-gate 自身 dogfood 配置（工具用自己来管自己）
+# 只列与内置默认的差异；完整默认与配置说明见 quality-gate.yaml.example
+#
+# 故意坏味道样本豁免（B1，2026-09-05 自身债务清理）：
+#   tests/smell/fixtures/ 是规则检测靶子——每个样本就是为触发对应规则
+#   而构造的（unused import / 超长函数 / 大class / 超参...），删除或
+#   "修复"它们等于摧毁规则的回归测试，故在 checker 层按路径豁免。
+#   规则层单测仍直接调 rule.check 验证检测能力，不受本豁免影响。
+smell:
+  ignore:
+    paths:
+      - "tests/smell/fixtures/*.py"
