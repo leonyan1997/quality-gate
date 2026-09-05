@@ -185,7 +185,7 @@ lint_ignore:
     - "**/target/**"
 
 smell:
-  max_function_lines: 40      # 函数体超过 → long-method（P0 阻塞）
+  max_function_lines: 60      # 函数体超过 → long-method（P0 阻塞）
   max_class_methods: 10       # 类方法数超过 → large-class（P1 阻塞）
   max_class_lines: 300        # 类行数超过 → large-class
   max_parameters: 5           # 参数超过 → long-parameter-list（P1 阻塞）

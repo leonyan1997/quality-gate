@@ -29,7 +29,7 @@ class ScanResult:
 
 @dataclasses.dataclass
 class SmellConfig:
-    max_function_lines: int = 40
+    max_function_lines: int = 60
     max_class_methods: int = 10
     max_class_lines: int = 300
     max_parameters: int = 5

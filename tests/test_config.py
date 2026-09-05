@@ -79,7 +79,7 @@ class TestSmellConfig:
         smell_cfg = build_smell_config(cfg)
 
         assert isinstance(smell_cfg, SmellConfig)
-        assert smell_cfg.max_function_lines == 40
+        assert smell_cfg.max_function_lines == 60
         assert smell_cfg.max_class_methods == 10
         assert smell_cfg.max_class_lines == 300
         assert smell_cfg.max_parameters == 5
@@ -157,7 +157,7 @@ class TestSmellConfig:
         # 同一进程内的新实例必须回落干净默认
         second = QualityGateConfig()
         smell_cfg = build_smell_config(second)
-        assert smell_cfg.max_function_lines == 40
+        assert smell_cfg.max_function_lines == 60
         assert smell_cfg.disabled_rules is None
         # 既有嵌套段（thresholds）同样不受前例污染
         assert second.get_threshold("duplication") == 3.0

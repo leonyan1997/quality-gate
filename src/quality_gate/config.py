@@ -103,7 +103,7 @@ class QualityGateConfig:
         # 默认值以 smell/types.py SmellConfig dataclass 为单一事实源，此处
         # 仅为 example/合并提供完整形态
         "smell": {
-            "max_function_lines": 40,
+            "max_function_lines": 60,
             "max_class_methods": 10,
             "max_class_lines": 300,
             "max_parameters": 5,

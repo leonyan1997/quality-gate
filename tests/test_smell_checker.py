@@ -45,8 +45,8 @@ def _init_repo(tmp_path: Path, files: dict[str, str]) -> Path:
     return repo
 
 
-def _long_func(passes: int = 44) -> str:
-    """超过 max_function_lines=40 的函数源码"""
+def _long_func(passes: int = 64) -> str:
+    """超过 max_function_lines=60 的函数源码"""
     return "def f():\n" + "    pass\n" * passes
 
 
@@ -56,7 +56,7 @@ class TestIncrementalScenes:
         repo = _init_repo(tmp_path, {"ok.py": "x = 1\n"})
         source = (
             "import os\n\n"
-            + _long_func(44)
+            + _long_func(64)
             + "\n\ndef many(a, b, c, d, e, f, g):\n    return a\n"
         )
         (repo / "new.py").write_text(source, encoding="utf-8")
@@ -74,7 +74,7 @@ class TestIncrementalScenes:
         """修改文件：函数体被 diff 触及并超过阈值 → long-method 阻塞"""
         repo = _init_repo(tmp_path, {"app.py": _long_func(4) + "\n"})
         # 不提交：增量语义对比 HEAD，working tree 的改动即 diff
-        (repo / "app.py").write_text(_long_func(44) + "\n", encoding="utf-8")
+        (repo / "app.py").write_text(_long_func(64) + "\n", encoding="utf-8")
 
         res = check_smell_incremental(repo)
 
@@ -86,7 +86,7 @@ class TestIncrementalScenes:
 
     def test_stock_debt_not_blocking(self, tmp_path):
         """存量坏味道：超长函数 + 死导入都在 diff 外 → 不阻塞"""
-        base = "import os\n\n" + _long_func(44) + "\n"
+        base = "import os\n\n" + _long_func(64) + "\n"
         repo = _init_repo(tmp_path, {"app.py": base})
         # 仅在文件尾部追加短函数，不触碰存量 f() 与 import os
         (repo / "app.py").write_text(
@@ -172,7 +172,7 @@ class TestFullModeAndCli:
         """full=True（scan 用）：无需 git，全量报告存量坏味道"""
         plain = tmp_path / "plain"
         plain.mkdir()
-        (plain / "bad.py").write_text(_long_func(44) + "\n", encoding="utf-8")
+        (plain / "bad.py").write_text(_long_func(64) + "\n", encoding="utf-8")
 
         res = check_smell_incremental(plain, full=True)
 

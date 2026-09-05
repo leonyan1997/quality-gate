@@ -6,10 +6,10 @@ from quality_gate.smell.types import SmellConfig
 
 
 def test_long_method_detects_long_function(smelly_source):
-    """A function > 40 lines should be flagged."""
+    """A function > configured threshold should be flagged."""
     rule = LongMethodRule()
     source, tree = smelly_source
-    findings = rule.check("test.py", source, tree, SmellConfig())
+    findings = rule.check("test.py", source, tree, SmellConfig(max_function_lines=40))
     # long_function has 40+ lines
     long_fns = [f for f in findings if "long_function" in f.detail.get("function", "")]
     assert len(long_fns) >= 1, f"Expected long_function to be detected: {findings}"

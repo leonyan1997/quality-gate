@@ -152,7 +152,7 @@ class TestRunFullScan:
         assert "smell" in results["python"]
         # yaml smell 段配置贯通：build_smell_config() 结果传入 checker
         assert isinstance(calls["smell_cfg"], SmellConfig)
-        assert calls["smell_cfg"].max_function_lines == 40
+        assert calls["smell_cfg"].max_function_lines == 60
         # dependency 按语言分发
         assert calls["dep_lang"] in ("rust", "ts", "python")
         # 结构: rust/ts/python 各含 lint(+dependency/complexity), duplication 顶层
