@@ -1,8 +1,8 @@
 """TypeScript 覆盖率增量检查器
 
 基于 vitest --coverage (json-summary) 输出，检查新增文件的覆盖率是否 > 0%。
-与 rust_coverage.py 同模式；在 web/ 等项目目录内运行:
-    quality-gate check --lang ts --checks coverage
+共享判定骨架在 coverage_common.py；本文件只留差异点: 报告定位/生成、
+JSON 装载、路径匹配。
 
 数据源:
   - 已有 coverage/coverage-summary.json → 直接解析
@@ -19,7 +19,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .git_diff import get_added_files, matches_ignore_patterns
+from .coverage_common import CoverageScan, scan_added_files_zero_coverage
+
+_DEFAULT_IGNORE = [
+    "**/*.d.ts", "**/*.test.ts", "**/*.spec.ts",
+    "**/*.test.tsx", "**/*.spec.tsx",
+    "**/generated/**", "**/dist/**", "**/node_modules/**",
+]
 
 
 def _find_coverage_summary(repo_root: Path) -> Path | None:
@@ -86,46 +92,15 @@ def check_ts_coverage_incremental(
 ) -> dict[str, Any]:
     """执行 TS 覆盖率增量检查（新增文件 >0%）"""
     if ignore_paths is None:
-        ignore_paths = [
-            "**/*.d.ts", "**/*.test.ts", "**/*.spec.ts",
-            "**/*.test.tsx", "**/*.spec.tsx",
-            "**/generated/**", "**/dist/**", "**/node_modules/**",
-        ]
+        ignore_paths = _DEFAULT_IGNORE
 
     result: dict[str, Any] = {
         "blocking": False, "issues": [], "coverage_data": {}, "skipped": None,
     }
 
-    summary_path = _find_coverage_summary(repo_root)
+    summary_path = _ensure_coverage_summary(repo_root, verbose, result)
     if summary_path is None:
-        # 尝试生成: 需要 vitest
-        if verbose:
-            print("  未找到 coverage-summary.json，运行 vitest --coverage...")
-        if not (shutil.which("vitest") or shutil.which("npx")):
-            result["skipped"] = "vitest/npx 不可用且无 coverage-summary.json"
-            if verbose:
-                print(f"    跳过 TS 覆盖率检查: {result['skipped']}")
-            return result
-        try:
-            proc = subprocess.run(
-                ["npx", "vitest", "run", "--coverage",
-                 "--coverage.reporter=json-summary"],
-                cwd=repo_root, capture_output=True, text=True, timeout=900,
-            )
-        except subprocess.TimeoutExpired:
-            result["blocking"] = True
-            result["issues"].append({
-                "file": "vitest", "line": 0, "column": 0, "level": "error",
-                "code": "timeout", "message": "vitest --coverage 执行超时 (>15 分钟)",
-            })
-            return result
-        summary_path = _find_coverage_summary(repo_root)
-        if summary_path is None:
-            result["skipped"] = (f"vitest 未产出 coverage-summary.json"
-                                 f" (exit {proc.returncode})")
-            if verbose:
-                print(f"    跳过 TS 覆盖率检查: {result['skipped']}")
-            return result
+        return result  # skipped / timeout 已在 result 记录
 
     data = _load_summary(summary_path)
     if data is None:
@@ -137,32 +112,55 @@ def check_ts_coverage_incremental(
         })
         return result
 
-    added_files = get_added_files(repo_root)
-    for filepath in sorted(added_files):
-        if not (filepath.endswith((".ts", ".tsx", ".vue", ".js"))):
-            continue
-        if matches_ignore_patterns(filepath, ignore_paths):
-            if verbose:
-                print(f"    跳过 (allowlist): {filepath}")
-            continue
+    scan_added_files_zero_coverage(
+        repo_root,
+        verbose=verbose,
+        scan=CoverageScan(
+            extensions=(".ts", ".tsx", ".vue", ".js"),
+            lookup=lambda rel: _file_covered(data, rel, repo_root),
+            ignore_paths=ignore_paths,
+        ),
+        result=result,
+    )
+    return result
 
-        cov = _file_covered(data, filepath, repo_root)
-        if cov is None:
-            if verbose:
-                print(f"    未收录 (测试未触及): {filepath}")
-            continue
-        covered, total = cov
-        if total == 0:
-            continue
-        result["coverage_data"][filepath] = {"covered": covered, "total_lines": total}
-        if covered == 0:
-            result["issues"].append({
-                "file": filepath, "line": 0, "column": 0, "level": "error",
-                "code": "zero_coverage",
-                "message": f"新增文件 {filepath} 覆盖率为 0%，请补充测试",
-            })
-            result["blocking"] = True
+
+def _ensure_coverage_summary(
+    repo_root: Path, verbose: bool, result: dict[str, Any],
+) -> Path | None:
+    """定位 coverage-summary.json；缺失则尝试生成（需要 vitest）
+
+    返回报告路径；None 表示跳过或超时（已写入 result.skipped / blocking）。
+    """
+    summary_path = _find_coverage_summary(repo_root)
+    if summary_path is not None:
+        return summary_path
 
     if verbose:
-        print(f"  检查 {len(added_files)} 个新增文件，发现 {len(result['issues'])} 个零覆盖率问题")
-    return result
+        print("  未找到 coverage-summary.json，运行 vitest --coverage...")
+    if not (shutil.which("vitest") or shutil.which("npx")):
+        result["skipped"] = "vitest/npx 不可用且无 coverage-summary.json"
+        if verbose:
+            print(f"    跳过 TS 覆盖率检查: {result['skipped']}")
+        return None
+    try:
+        proc = subprocess.run(
+            ["npx", "vitest", "run", "--coverage",
+             "--coverage.reporter=json-summary"],
+            cwd=repo_root, capture_output=True, text=True, timeout=900,
+        )
+    except subprocess.TimeoutExpired:
+        result["blocking"] = True
+        result["issues"].append({
+            "file": "vitest", "line": 0, "column": 0, "level": "error",
+            "code": "timeout", "message": "vitest --coverage 执行超时 (>15 分钟)",
+        })
+        return None
+
+    summary_path = _find_coverage_summary(repo_root)
+    if summary_path is None:
+        result["skipped"] = (f"vitest 未产出 coverage-summary.json"
+                             f" (exit {proc.returncode})")
+        if verbose:
+            print(f"    跳过 TS 覆盖率检查: {result['skipped']}")
+    return summary_path

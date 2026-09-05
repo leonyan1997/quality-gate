@@ -1,7 +1,8 @@
 """Python 覆盖率增量检查器
 
 基于 coverage.py JSON 输出，检查新增文件的覆盖率是否 > 0%。
-与 rust_coverage.py 同模式。
+共享判定骨架在 coverage_common.py；本文件只留差异点: 报告定位/生成、
+JSON 装载、路径匹配。
 
 数据源:
   - 已有 coverage/coverage.json → 直接解析
@@ -17,7 +18,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .git_diff import get_added_files, matches_ignore_patterns
+from .coverage_common import CoverageScan, scan_added_files_zero_coverage
+
+_DEFAULT_IGNORE = [
+    "**/models.py", "**/schemas.py", "**/constants.py",
+    "**/migrations/**", "**/generated/**", "**/test_*.py",
+    "**/*_test.py", "**/tests/**", "**/.venv/**", "**/venv/**",
+]
 
 
 def _find_coverage_json(repo_root: Path) -> Path | None:
@@ -82,49 +89,15 @@ def check_python_coverage_incremental(
 ) -> dict[str, Any]:
     """执行 Python 覆盖率增量检查（新增文件 >0%）"""
     if ignore_paths is None:
-        ignore_paths = [
-            "**/models.py", "**/schemas.py", "**/constants.py",
-            "**/migrations/**", "**/generated/**", "**/test_*.py",
-            "**/*_test.py", "**/tests/**", "**/.venv/**", "**/venv/**",
-        ]
+        ignore_paths = _DEFAULT_IGNORE
 
     result: dict[str, Any] = {
         "blocking": False, "issues": [], "coverage_data": {}, "skipped": None,
     }
 
-    cov_path = _find_coverage_json(repo_root)
+    cov_path = _ensure_coverage_report(repo_root, verbose, result)
     if cov_path is None:
-        if verbose:
-            print("  未找到 coverage.json，运行 coverage run -m pytest...")
-        if not shutil.which("coverage"):
-            result["skipped"] = "coverage 不可用且无 coverage.json"
-            if verbose:
-                print(f"    跳过 Python 覆盖率检查: {result['skipped']}")
-            return result
-        try:
-            proc = subprocess.run(
-                ["coverage", "run", "-m", "pytest", "-q"],
-                cwd=repo_root, capture_output=True, text=True, timeout=900,
-            )
-            if verbose and proc.returncode != 0:
-                print(f"    pytest 退出码 {proc.returncode}（测试失败但仍生成覆盖率）")
-            subprocess.run(
-                ["coverage", "json"],
-                cwd=repo_root, capture_output=True, text=True, timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            result["blocking"] = True
-            result["issues"].append({
-                "file": "pytest", "line": 0, "column": 0, "level": "error",
-                "code": "timeout", "message": "coverage run -m pytest 执行超时 (>15 分钟)",
-            })
-            return result
-        cov_path = _find_coverage_json(repo_root)
-        if cov_path is None:
-            result["skipped"] = "coverage json 未产出 coverage.json"
-            if verbose:
-                print(f"    跳过 Python 覆盖率检查: {result['skipped']}")
-            return result
+        return result  # skipped / timeout 已在 result 记录
 
     data = _load_coverage(cov_path)
     if data is None:
@@ -135,32 +108,59 @@ def check_python_coverage_incremental(
         })
         return result
 
-    added_files = get_added_files(repo_root)
-    for filepath in sorted(added_files):
-        if not filepath.endswith(".py"):
-            continue
-        if matches_ignore_patterns(filepath, ignore_paths):
-            if verbose:
-                print(f"    跳过 (allowlist): {filepath}")
-            continue
+    scan_added_files_zero_coverage(
+        repo_root,
+        verbose=verbose,
+        scan=CoverageScan(
+            extensions=(".py",),
+            lookup=lambda rel: _file_covered(data, repo_root, rel),
+            ignore_paths=ignore_paths,
+        ),
+        result=result,
+    )
+    return result
 
-        cov = _file_covered(data, repo_root, filepath)
-        if cov is None:
-            if verbose:
-                print(f"    未收录 (测试未触及): {filepath}")
-            continue
-        covered, total = cov
-        if total == 0:
-            continue
-        result["coverage_data"][filepath] = {"covered": covered, "total_lines": total}
-        if covered == 0:
-            result["issues"].append({
-                "file": filepath, "line": 0, "column": 0, "level": "error",
-                "code": "zero_coverage",
-                "message": f"新增文件 {filepath} 覆盖率为 0%，请补充测试",
-            })
-            result["blocking"] = True
+
+def _ensure_coverage_report(
+    repo_root: Path, verbose: bool, result: dict[str, Any],
+) -> Path | None:
+    """定位 coverage.json；缺失则尝试生成
+
+    返回报告路径；None 表示跳过或超时（已写入 result.skipped / blocking）。
+    """
+    cov_path = _find_coverage_json(repo_root)
+    if cov_path is not None:
+        return cov_path
 
     if verbose:
-        print(f"  检查 {len(added_files)} 个新增文件，发现 {len(result['issues'])} 个零覆盖率问题")
-    return result
+        print("  未找到 coverage.json，运行 coverage run -m pytest...")
+    if not shutil.which("coverage"):
+        result["skipped"] = "coverage 不可用且无 coverage.json"
+        if verbose:
+            print(f"    跳过 Python 覆盖率检查: {result['skipped']}")
+        return None
+    try:
+        proc = subprocess.run(
+            ["coverage", "run", "-m", "pytest", "-q"],
+            cwd=repo_root, capture_output=True, text=True, timeout=900,
+        )
+        if verbose and proc.returncode != 0:
+            print(f"    pytest 退出码 {proc.returncode}（测试失败但仍生成覆盖率）")
+        subprocess.run(
+            ["coverage", "json"],
+            cwd=repo_root, capture_output=True, text=True, timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        result["blocking"] = True
+        result["issues"].append({
+            "file": "pytest", "line": 0, "column": 0, "level": "error",
+            "code": "timeout", "message": "coverage run -m pytest 执行超时 (>15 分钟)",
+        })
+        return None
+
+    cov_path = _find_coverage_json(repo_root)
+    if cov_path is None:
+        result["skipped"] = "coverage json 未产出 coverage.json"
+        if verbose:
+            print(f"    跳过 Python 覆盖率检查: {result['skipped']}")
+    return cov_path
